@@ -1,4 +1,5 @@
 pub mod data;
+pub mod solver;
 pub mod types;
 
 use leptos::prelude::*;
