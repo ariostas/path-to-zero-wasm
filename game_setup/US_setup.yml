@@ -1,0 +1,184 @@
+## GAME SETUP 
+current_stage: 1
+available_budget_tokens: 5
+available_shaping_tokens: 2
+current_stage_shaping_tokens: 2
+available_build_tokens:
+  - 10
+  - 10
+  - 10
+  - 11
+  - 12
+
+stages:
+  - 2030
+  - 2035
+  - 2040
+  - 2045
+  - 2050
+
+# Resource names
+resource_blocks:
+
+  block_1:
+    name: "ONSHORE WIND POWER"
+    start_capacity: 0
+    build_cost: 10
+    backlash_risk: "high"
+    EDG_data_name: "onshore_wind"
+    EDG_data_info: "Average output (capacity factor): 47%"
+    new_resource: true
+    social_backlash: false
+
+  block_2:
+    name: "UTILITY-SCALE SOLAR PV"
+    start_capacity: 0
+    build_cost: 15
+    backlash_risk: "moderate"
+    EDG_data_name: "solar_pv"
+    EDG_data_info: "Average output (capacity factor): 25%"
+    new_resource: true
+    social_backlash: false
+
+  block_3:
+    name: "OFFSHORE WIND POWER"
+    start_capacity: 0
+    build_cost: 5
+    backlash_risk: "low"
+    EDG_data_name: "offshore_wind"
+    EDG_data_info: "Average output (capacity factor): 51%"
+    new_resource: true
+    social_backlash: false
+
+  block_4:
+    name: "DISTRIBUTED SOLAR PV"
+    start_capacity: 0
+    build_cost: 8
+    backlash_risk: "none"
+    EDG_data_name: "distributed_solar"
+    EDG_data_info: "Average output (capacity factor): 18%"
+    new_resource: true
+    social_backlash: false
+
+  block_5:
+    name: "BATTERY ENERGY STORAGE"
+    start_capacity: 0
+    build_cost: 20
+    backlash_risk: "none"
+    EDG_data_name: "battery"
+    EDG_data_info: "4 hours of storage per GW of capacity, 85% efficient"
+    new_resource: true
+    social_backlash: false
+
+  block_6:
+    name: "CLEAN FIRM RESOURCE"
+    start_capacity: 0
+    build_cost: 4
+    backlash_risk: "low"
+    EDG_data_name: "clean_firm"
+    EDG_data_info: "Unavailable in Stage 1. Unlocked with Shaping token"
+    new_resource: true
+    social_backlash: false
+
+  block_7:
+    name: "NUCLEAR"
+    start_capacity: 10
+    build_cost: 10
+    backlash_risk: "moderate"
+    EDG_data_name: "nuclear"
+    EDG_data_info: "Life extension & relicensing: Costs 2x Build tokens in Stage 2."
+    new_resource: false
+    social_backlash: false
+
+  block_8:
+    name: "NATURAL GAS"
+    start_capacity: 60
+    build_cost: 20
+    backlash_risk: "low"
+    EDG_data_name: "natural_gas"
+    EDG_data_info: "Emitting generation source"
+    new_resource: false
+    social_backlash: false
+
+# Uncertainty parameters
+uncertainty_parameters: 
+  Demand_Variance: 0.05
+  Outage_Probability: 0.66
+  Outage_Rate: 0.5
+  Disaster_Probability:
+    - 0.15
+    - 0.3
+    - 0.45
+    - 0.6
+    - 0.75
+
+# Experience rate is decline in technology cost for each build point spent on each resource
+experience_rate: 0.025
+
+# Backlash rates are probability used in a Bernoulli distribution with one draw per build point spent on each resource (halved by Shaping points)  
+backlash_rates:
+  none: 0
+  low: 0.1
+  moderate: 0.17
+  high: 0.25
+
+# Scoring setup
+scoring_parameters:
+  Max_Points: 5
+  Clean_Stage_1:
+    - 60
+    - 58
+    - 56
+    - 53
+    - 50
+  Clean_Stage_2:
+    - 70
+    - 68
+    - 66
+    - 63
+    - 60
+  Clean_Stage_3:
+    - 80
+    - 78
+    - 76
+    - 73
+    - 70
+  Clean_Stage_4:
+    - 90
+    - 88
+    - 86
+    - 83
+    - 80
+  Clean_Stage_5:
+    - 99.9
+    - 99
+    - 98
+    - 96
+    - 90
+  Reliability:
+    - 99.9
+    - 99.5
+    - 99.0
+    - 98.0
+    - 97.0
+  
+shaping_tokens:
+  resilience: false
+  innovation_experience: false
+  innovation_clean_firm: false
+  social_license: false
+
+reliability_scores:
+  1: 0
+  2: 0
+  3: 0
+  4: 0
+  5: 0
+
+clean_scores:
+  1: 0
+  2: 0
+  3: 0
+  4: 0
+  5: 0
+
