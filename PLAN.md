@@ -5,7 +5,7 @@ complete and fully tested. What remains is wiring everything together in a Lepto
 
 ---
 
-## Step 1 — Game state management
+## Step 1 — Game state management ✓
 
 Create a central reactive state type that owns the full in-progress game and expose it
 as a Leptos context so every component can read and update it.
@@ -20,7 +20,7 @@ as a Leptos context so every component can read and update it.
 
 ---
 
-## Step 2 — Setup screen
+## Step 2 — Setup screen ✓
 
 The first screen the player sees. Allows choosing a pre-built scenario or uploading a
 custom YAML file.

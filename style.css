@@ -367,6 +367,107 @@ header h2 {
     margin-top: 24px;
 }
 
+/* Planning screen */
+.planning-screen {
+    padding: 8px 0;
+}
+
+.planning-stage-bar {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.stage-btn.done {
+    background-color: rgb(100, 100, 180);
+    cursor: default;
+}
+
+.planning-summary {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding: 8px 4px;
+    font-size: 0.95rem;
+}
+
+.planning-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.planning-shaping {
+    border-top: 1px solid #ddd;
+    padding-top: 12px;
+}
+
+/* Resource block internals */
+.rb-name {
+    font-weight: bold;
+    font-size: 0.95rem;
+    margin-bottom: 2px;
+}
+
+.rb-cap {
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: rgb(16, 16, 129);
+}
+
+.rb-info {
+    font-size: 0.78rem;
+    color: #555;
+    margin-bottom: 6px;
+}
+
+.rb-token-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.rb-token-count {
+    min-width: 24px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 1rem;
+}
+
+.rb-token-boxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+}
+
+/* Small token boxes for resource cards */
+.token-box-sm {
+    width: 18px;
+    height: 18px;
+    border: 1px solid #999;
+    border-radius: 2px;
+    display: inline-block;
+    background-color: white;
+}
+
+.token-box-sm.active {
+    background-color: rgb(160, 218, 170);
+    border-color: #4a9;
+}
+
+/* Preview panel */
+.preview-panel {
+    border-top: 2px solid rgb(16, 16, 129);
+    padding-top: 12px;
+}
+
+.preview-panel h3 {
+    color: rgb(16, 16, 129);
+    font-size: 1rem;
+}
+
 /* Utility */
 .text-center { text-align: center; }
 .mt-8 { margin-top: 8px; }

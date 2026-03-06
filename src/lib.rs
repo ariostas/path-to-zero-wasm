@@ -8,7 +8,7 @@ pub mod types;
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 
-use screens::SetupScreen;
+use screens::{PlanningScreen, SetupScreen};
 use state::{GameState, Screen};
 
 #[wasm_bindgen(start)]
@@ -33,7 +33,7 @@ fn App() -> impl IntoView {
                 None => view! { <SetupScreen /> }.into_any(),
                 Some(gs) => match gs.screen {
                     Screen::Planning =>
-                        view! { <p>"Planning screen — coming soon"</p> }.into_any(),
+                        view! { <PlanningScreen /> }.into_any(),
                     Screen::StageResults =>
                         view! { <p>"Results screen — coming soon"</p> }.into_any(),
                     Screen::EndGame =>
