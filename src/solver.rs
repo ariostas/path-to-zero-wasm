@@ -18,6 +18,67 @@ pub struct SolverResult {
     pub stor_indices: Vec<usize>,
 }
 
+/// Fast greedy dispatch for UI testing — no LP, not optimal.
+///
+/// Dispatches each non-storage resource up to its available capacity in
+/// resource order, then puts any remaining unmet demand into NSE segment 0.
+/// Storage is left idle (charge = SOC = gen = 0).
+pub fn dummy_solve(inputs: &SimInputs) -> SolverResult {
+    let n_t = inputs.demand.len();
+    let n_g = inputs.resources.len();
+    let n_s = inputs.nse_segments.len();
+
+    let stor_indices: Vec<usize> = inputs
+        .resources
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.stor >= 1)
+        .map(|(i, _)| i)
+        .collect();
+    let n_stor = stor_indices.len();
+
+    let mut gen = vec![0.0f64; n_t * n_g];
+    let charge = vec![0.0f64; n_t * n_stor];
+    let soc = vec![0.0f64; n_t * n_stor];
+    let mut nse = vec![0.0f64; n_t * n_s];
+
+    for t in 0..n_t {
+        let demand_mw = inputs.demand[t];
+        let mut remaining = demand_mw;
+
+        for g in 0..n_g {
+            if stor_indices.contains(&g) {
+                continue;
+            }
+            let res = &inputs.resources[g];
+            let cf = if res.vre >= 1 {
+                inputs.variability[t * n_g + g]
+            } else {
+                1.0
+            };
+            let available = res.existing_cap_mw * cf;
+            let dispatch = available.min(remaining.max(0.0));
+            gen[t * n_g + g] = dispatch;
+            remaining -= dispatch;
+        }
+
+        if n_s > 0 && remaining > 0.0 {
+            let max_nse = inputs.nse_segments[0].nse_max * demand_mw;
+            nse[t * n_s] = remaining.min(max_nse);
+        }
+    }
+
+    SolverResult {
+        gen,
+        charge,
+        soc,
+        nse,
+        objective_value: 0.0,
+        status: "dummy".to_string(),
+        stor_indices,
+    }
+}
+
 /// Solve the LP economic dispatch using Clarabel.
 ///
 /// Maps the JuMP/HiGHS model from EDG_engine.jl to Clarabel's standard form:
@@ -500,6 +561,34 @@ mod tests {
         assert!((r.gen[1] - 600.0).abs() < 1.0, "gen[1]={}", r.gen[1]);
         // Ramp from t=0 to t=1 must not exceed 100 MW
         assert!(r.gen[1] - r.gen[0] <= 100.0 + 1.0, "ramp={}", r.gen[1] - r.gen[0]);
+    }
+
+    /// Run `cargo test --release -- --ignored --nocapture time_real_solve` to benchmark.
+    #[test]
+    #[ignore]
+    fn time_real_solve() {
+        use crate::data::{self, SETUP_US};
+        use crate::state::GameState;
+        use std::time::Instant;
+
+        let setup = data::parse_game_setup(SETUP_US);
+        let gs = GameState::new(setup);
+        let inputs = data::load_sim_inputs(
+            gs.current_year(),
+            &gs.resource_params,
+            gs.is_new_nuclear(),
+        );
+        println!(
+            "Problem: {} time steps, {} resources, {} NSE segments",
+            inputs.demand.len(),
+            inputs.resources.len(),
+            inputs.nse_segments.len(),
+        );
+
+        let t0 = Instant::now();
+        let sol = solve(&inputs);
+        let elapsed = t0.elapsed();
+        println!("solve() returned {:?} in {:.3}s", sol.status, elapsed.as_secs_f64());
     }
 
     #[test]

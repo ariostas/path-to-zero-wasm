@@ -2,6 +2,11 @@ use crate::types::*;
 use csv::ReaderBuilder;
 use std::collections::HashMap;
 
+/// Keep one time step every this many hours within each representative period.
+/// 168 hours/week ÷ 24 = 7 samples/week → 364 total steps instead of 8 735.
+/// Each sampled step's weight is multiplied by STRIDE to preserve annual energy.
+const STRIDE: usize = 24;
+
 // ---------------------------------------------------------------------------
 // Embedded CSV data (compile-time inclusion)
 // ---------------------------------------------------------------------------
@@ -451,12 +456,35 @@ pub fn load_sim_inputs(
         })
         .collect();
 
+    // --- Subsample time steps ---
+    // Keep one step per STRIDE hours in each representative period.
+    // hours_per_period must be divisible by STRIDE (168 / 24 = 7).
+    let h = demand.hours_per_period;
+    let h_sampled = h / STRIDE;
+    let n_periods = n_t / h;
+    let n_t_sampled = n_periods * h_sampled;
+
+    let mut demand_s = Vec::with_capacity(n_t_sampled);
+    let mut weight_s = Vec::with_capacity(n_t_sampled);
+    let mut variability_s = Vec::with_capacity(n_t_sampled * N_RESOURCES);
+
+    for p in 0..n_periods {
+        for s in 0..h_sampled {
+            let t = p * h + s * STRIDE;
+            demand_s.push(demand.load_mw_z1[t]);
+            weight_s.push(demand.sample_weight[t] * STRIDE as f64);
+            variability_s.extend_from_slice(
+                &variability[t * N_RESOURCES..(t + 1) * N_RESOURCES],
+            );
+        }
+    }
+
     SimInputs {
         resources,
-        demand: demand.load_mw_z1,
-        variability,
-        sample_weight: demand.sample_weight,
-        hours_per_period: demand.hours_per_period,
+        demand: demand_s,
+        variability: variability_s,
+        sample_weight: weight_s,
+        hours_per_period: h_sampled,
         nse_segments: demand.nse_segments,
     }
 }
