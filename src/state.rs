@@ -150,16 +150,18 @@ impl GameState {
         self.experience_history.push(experience);
         self.preview = None;
 
-        self.screen = if self.stage_history.len() >= N_STAGES {
-            Screen::EndGame
-        } else {
-            Screen::StageResults
-        };
+        // Always show results first, even after the final stage.
+        self.screen = Screen::StageResults;
     }
 
-    /// Transition from the StageResults screen back to Planning.
-    pub fn continue_to_planning(&mut self) {
-        self.screen = Screen::Planning;
+    /// Transition from the StageResults screen to the next screen:
+    /// Planning if there are more stages, EndGame if the game is over.
+    pub fn continue_from_results(&mut self) {
+        self.screen = if self.stage_history.len() < N_STAGES {
+            Screen::Planning
+        } else {
+            Screen::EndGame
+        };
     }
 }
 
