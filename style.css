@@ -501,6 +501,45 @@ header h2 {
     padding-bottom: 24px;
 }
 
+/* Uncertainty narrative */
+.narrative-section {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 12px;
+    background: #fafafa;
+}
+
+.narrative-title {
+    font-size: 1rem;
+    font-weight: bold;
+    color: rgb(16, 16, 129);
+    margin-bottom: 8px;
+}
+
+.narrative-item {
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 0.9rem;
+}
+
+.narrative-item:last-child {
+    border-bottom: none;
+}
+
+.narrative-disaster {
+    color: rgb(180, 30, 0);
+    font-weight: 500;
+}
+
+.narrative-backlash {
+    color: rgb(160, 60, 0);
+    font-weight: 500;
+}
+
+.narrative-experience {
+    color: rgb(0, 120, 60);
+}
+
 /* Utility */
 .text-center { text-align: center; }
 .mt-8 { margin-top: 8px; }

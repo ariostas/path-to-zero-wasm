@@ -168,6 +168,98 @@ pub fn StageResultsScreen() -> impl IntoView {
                 />
             </div>
 
+            // --- Uncertainty narrative ---
+            {move || game.with(|opt| {
+                let gs = opt.as_ref()?;
+                let (sr, backlash, experience) = gs.last_stage_results.as_ref()?;
+
+                let shock_pct = sr.uncertainty.demand_shock_percent * 100.0;
+                let disaster = sr.uncertainty.disaster;
+                let outage_week = sr.uncertainty.outage_week;
+                let forced_outages = sr.uncertainty.forced_outages;
+                let backlash_flags = backlash.backlash;
+                let exp_rates = experience.experience_rate;
+
+                let disaster_resources: Vec<String> = forced_outages
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, &fo)| fo)
+                    .map(|(g, _)| RESOURCE_LABELS[g].to_string())
+                    .collect();
+
+                let backlash_resources: Vec<String> = backlash_flags
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, &b)| b)
+                    .map(|(g, _)| RESOURCE_LABELS[g].to_string())
+                    .collect();
+
+                let exp_items: Vec<(String, f64)> = exp_rates
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, &r)| r > 0.0)
+                    .map(|(g, &r)| (RESOURCE_LABELS[g].to_string(), r * 100.0))
+                    .collect();
+
+                let shock_text = if shock_pct >= 0.0 {
+                    format!("+{:.1}% higher demand than expected", shock_pct)
+                } else {
+                    format!("{:.1}% lower demand than expected", shock_pct)
+                };
+
+                let disaster_text = if disaster {
+                    let res = if disaster_resources.is_empty() {
+                        "no resources affected".to_string()
+                    } else {
+                        disaster_resources.join(", ")
+                    };
+                    Some(format!(
+                        "Extreme weather event in week {} — forced outages: {}",
+                        outage_week, res
+                    ))
+                } else {
+                    None
+                };
+
+                let backlash_text = if backlash_resources.is_empty() {
+                    None
+                } else {
+                    Some(format!(
+                        "{} locked for future stages due to social backlash",
+                        backlash_resources.join(", ")
+                    ))
+                };
+
+                let exp_text = if exp_items.is_empty() {
+                    None
+                } else {
+                    Some(format!(
+                        "Build cost reductions: {}",
+                        exp_items
+                            .iter()
+                            .map(|(n, r)| format!("{} \u{2212}{:.1}%", n, r))
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    ))
+                };
+
+                Some(view! {
+                    <div class="narrative-section mt-16">
+                        <h3 class="narrative-title">"Stage Events"</h3>
+                        <div class="narrative-item">"Demand: " {shock_text}</div>
+                        {disaster_text.map(|t| view! {
+                            <div class="narrative-item narrative-disaster">{t}</div>
+                        })}
+                        {backlash_text.map(|t| view! {
+                            <div class="narrative-item narrative-backlash">{t}</div>
+                        })}
+                        {exp_text.map(|t| view! {
+                            <div class="narrative-item narrative-experience">{t}</div>
+                        })}
+                    </div>
+                })
+            })}
+
             // --- Generation mix table ---
             {move || game.with(|opt| {
                 let (sr, _, _) = opt.as_ref()?.last_stage_results.as_ref()?;
