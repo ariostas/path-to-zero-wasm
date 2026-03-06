@@ -509,11 +509,14 @@ mod yaml_schema {
     }
 
     #[derive(Deserialize)]
-    #[serde(rename_all = "PascalCase")]
     pub struct RawUncertainty {
+        #[serde(rename = "Demand_Variance")]
         pub demand_variance: f64,
+        #[serde(rename = "Outage_Probability")]
         pub outage_probability: f64,
+        #[serde(rename = "Outage_Rate")]
         pub outage_rate: f64,
+        #[serde(rename = "Disaster_Probability")]
         pub disaster_probability: Vec<f64>,
     }
 
@@ -526,8 +529,8 @@ mod yaml_schema {
     }
 
     #[derive(Deserialize)]
-    #[serde(rename_all = "PascalCase")]
     pub struct RawScoring {
+        #[serde(rename = "Max_Points")]
         pub max_points: usize,
         #[serde(rename = "Clean_Stage_1")]
         pub clean_stage_1: Vec<f64>,
@@ -685,4 +688,139 @@ fn to_arr5(v: &[f64]) -> [f64; 5] {
         arr[i] = x;
     }
     arr
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::*;
+
+    fn default_resource_params() -> ResourceParams {
+        ResourceParams {
+            names: RESOURCE_ORDER.map(|s| s.to_string()),
+            start_capacity: [0.0; N_RESOURCES],
+            build_cost: [1.0; N_RESOURCES],
+            build_tokens: [0; N_RESOURCES],
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_game_setup
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_game_setup_us_structure() {
+        let setup = parse_game_setup(SETUP_US);
+        assert_eq!(setup.stages.len(), N_STAGES);
+        assert_eq!(setup.resource_blocks.len(), N_RESOURCES);
+        assert_eq!(setup.available_build_tokens.len(), N_STAGES);
+        assert!(setup.scoring_params.max_points > 0);
+        assert!(setup.experience_rate >= 0.0);
+    }
+
+    #[test]
+    fn parse_game_setup_all_builtins_succeed() {
+        // Verify none of the built-in YAML files panic on parse
+        for (name, yaml) in builtin_setups() {
+            let setup = parse_game_setup(yaml);
+            assert_eq!(
+                setup.resource_blocks.len(), N_RESOURCES,
+                "wrong resource count for {name}"
+            );
+            assert_eq!(setup.stages.len(), N_STAGES, "wrong stage count for {name}");
+        }
+    }
+
+    #[test]
+    fn parse_game_setup_stages_are_ascending() {
+        let setup = parse_game_setup(SETUP_US);
+        for i in 1..N_STAGES {
+            assert!(
+                setup.stages[i] > setup.stages[i - 1],
+                "stages not ascending: {:?}", setup.stages
+            );
+        }
+    }
+
+    #[test]
+    fn parse_game_setup_shaping_tokens_present() {
+        // Shaping tokens should parse without panicking; default state is all false
+        let setup = parse_game_setup(SETUP_US);
+        // Just confirm the field exists and is accessible
+        let _ = setup.shaping_tokens;
+    }
+
+    // -----------------------------------------------------------------------
+    // load_sim_inputs
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn load_sim_inputs_2030_structure() {
+        let params = default_resource_params();
+        let inputs = load_sim_inputs(2030, &params, false);
+        assert_eq!(inputs.resources.len(), N_RESOURCES);
+        assert!(!inputs.demand.is_empty(), "demand should be non-empty");
+        assert_eq!(
+            inputs.variability.len(),
+            inputs.demand.len() * N_RESOURCES,
+            "variability length mismatch"
+        );
+        assert_eq!(inputs.sample_weight.len(), inputs.demand.len());
+        assert!(!inputs.nse_segments.is_empty(), "expected at least one NSE segment");
+    }
+
+    #[test]
+    fn load_sim_inputs_all_years_parse() {
+        let params = default_resource_params();
+        for year in [2030u32, 2035, 2040, 2045, 2050] {
+            let inputs = load_sim_inputs(year, &params, false);
+            assert_eq!(inputs.resources.len(), N_RESOURCES, "year {year}");
+            assert!(!inputs.demand.is_empty(), "year {year}: empty demand");
+        }
+    }
+
+    #[test]
+    fn load_sim_inputs_resources_in_canonical_order() {
+        let params = default_resource_params();
+        let inputs = load_sim_inputs(2030, &params, false);
+        for (g, &expected_name) in RESOURCE_ORDER.iter().enumerate() {
+            assert_eq!(
+                inputs.resources[g].name, expected_name,
+                "resource {g} name mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn load_sim_inputs_build_tokens_increase_capacity() {
+        // Adding build tokens should increase existing_cap_mw
+        let mut params = default_resource_params();
+        // Allocate 2 tokens to solar_pv (index 2), build_cost = 1.0 GW/token
+        let solar_idx = resource_index("solar_pv").unwrap();
+        params.build_tokens[solar_idx] = 2;
+        params.build_cost[solar_idx] = 1.0; // 1 GW per token
+
+        let inputs = load_sim_inputs(2030, &params, false);
+        // start_capacity=0 + 1.0 * 2 = 2 GW = 2000 MW
+        assert!(
+            (inputs.resources[solar_idx].existing_cap_mw - 2000.0).abs() < 1.0,
+            "solar cap = {} MW, expected 2000 MW",
+            inputs.resources[solar_idx].existing_cap_mw
+        );
+    }
+
+    #[test]
+    fn load_sim_inputs_battery_mwh_is_4x_mw() {
+        let mut params = default_resource_params();
+        let batt_idx = resource_index("battery").unwrap();
+        params.build_tokens[batt_idx] = 1;
+        params.build_cost[batt_idx] = 1.0; // 1 GW/token → 1000 MW
+
+        let inputs = load_sim_inputs(2030, &params, false);
+        let batt = &inputs.resources[batt_idx];
+        assert!(
+            (batt.existing_cap_mwh - batt.existing_cap_mw * 4.0).abs() < 1.0,
+            "battery MWh ({}) != 4 × MW ({})", batt.existing_cap_mwh, batt.existing_cap_mw
+        );
+    }
 }

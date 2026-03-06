@@ -337,3 +337,51 @@ pub struct SocialBacklash {
 pub struct ExperienceResults {
     pub experience_rate: [f64; N_RESOURCES],
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resource_index_all_known() {
+        assert_eq!(resource_index("natural_gas"), Some(0));
+        assert_eq!(resource_index("nuclear"), Some(1));
+        assert_eq!(resource_index("solar_pv"), Some(2));
+        assert_eq!(resource_index("distributed_solar"), Some(3));
+        assert_eq!(resource_index("onshore_wind"), Some(4));
+        assert_eq!(resource_index("offshore_wind"), Some(5));
+        assert_eq!(resource_index("battery"), Some(6));
+        assert_eq!(resource_index("clean_firm"), Some(7));
+    }
+
+    #[test]
+    fn resource_index_unknown_returns_none() {
+        assert_eq!(resource_index("coal"), None);
+        assert_eq!(resource_index("hydro"), None);
+        assert_eq!(resource_index(""), None);
+        assert_eq!(resource_index("Solar_PV"), None); // case-sensitive
+    }
+
+    #[test]
+    fn backlash_level_from_str_all_variants() {
+        assert!(matches!(BacklashLevel::from_str("low"), BacklashLevel::Low));
+        assert!(matches!(BacklashLevel::from_str("LOW"), BacklashLevel::Low));
+        assert!(matches!(BacklashLevel::from_str("Low"), BacklashLevel::Low));
+        assert!(matches!(BacklashLevel::from_str("moderate"), BacklashLevel::Moderate));
+        assert!(matches!(BacklashLevel::from_str("MODERATE"), BacklashLevel::Moderate));
+        assert!(matches!(BacklashLevel::from_str("high"), BacklashLevel::High));
+        assert!(matches!(BacklashLevel::from_str("HIGH"), BacklashLevel::High));
+        assert!(matches!(BacklashLevel::from_str("none"), BacklashLevel::None));
+        assert!(matches!(BacklashLevel::from_str(""), BacklashLevel::None));
+        assert!(matches!(BacklashLevel::from_str("unknown"), BacklashLevel::None));
+    }
+
+    #[test]
+    fn backlash_rates_rate_for_all_levels() {
+        let rates = BacklashRates { none: 0.0, low: 0.05, moderate: 0.15, high: 0.4 };
+        assert_eq!(rates.rate_for(&BacklashLevel::None), 0.0);
+        assert_eq!(rates.rate_for(&BacklashLevel::Low), 0.05);
+        assert_eq!(rates.rate_for(&BacklashLevel::Moderate), 0.15);
+        assert_eq!(rates.rate_for(&BacklashLevel::High), 0.4);
+    }
+}

@@ -511,3 +511,87 @@ fn sample_normal(mean: f64, std: f64, rng: &mut impl Rng) -> f64 {
     let z = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
     mean + std * z
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::*;
+
+    fn test_scoring_params() -> ScoringParams {
+        ScoringParams {
+            max_points: 5,
+            clean_thresholds: [
+                [80.0, 60.0, 40.0, 20.0, 5.0],
+                [85.0, 65.0, 45.0, 25.0, 10.0],
+                [90.0, 70.0, 50.0, 30.0, 15.0],
+                [92.0, 75.0, 55.0, 35.0, 20.0],
+                [95.0, 80.0, 60.0, 40.0, 25.0],
+            ],
+            reliability_thresholds: [99.9, 99.5, 99.0, 98.0, 95.0],
+        }
+    }
+
+    #[test]
+    fn calc_scores_perfect() {
+        let p = test_scoring_params();
+        let s = calc_scores(1, 100.0, 100.0, &p);
+        assert_eq!(s.reliability_points, 5);
+        assert_eq!(s.clean_points, 5);
+        assert_eq!(s.reliability, 100.0);
+        assert_eq!(s.clean_share, 100.0);
+    }
+
+    #[test]
+    fn calc_scores_zero_reliability_and_clean() {
+        let p = test_scoring_params();
+        let s = calc_scores(1, 0.0, 0.0, &p);
+        assert_eq!(s.reliability_points, 0);
+        assert_eq!(s.clean_points, 0);
+    }
+
+    #[test]
+    fn calc_scores_reliability_thresholds() {
+        let p = test_scoring_params();
+        // reliability_thresholds = [99.9, 99.5, 99.0, 98.0, 95.0]
+        assert_eq!(calc_scores(1, 99.9, 100.0, &p).reliability_points, 5);
+        assert_eq!(calc_scores(1, 99.8, 100.0, &p).reliability_points, 4);
+        assert_eq!(calc_scores(1, 99.2, 100.0, &p).reliability_points, 3);
+        assert_eq!(calc_scores(1, 98.5, 100.0, &p).reliability_points, 2);
+        assert_eq!(calc_scores(1, 96.0, 100.0, &p).reliability_points, 1);
+        assert_eq!(calc_scores(1, 90.0, 100.0, &p).reliability_points, 0);
+    }
+
+    #[test]
+    fn calc_scores_uses_correct_stage_thresholds() {
+        let p = test_scoring_params();
+        // clean = 50.0
+        // Stage 1: [80,60,40,20,5]  → fails 80,60; passes 40 → 3 points
+        assert_eq!(calc_scores(1, 100.0, 50.0, &p).clean_points, 3);
+        // Stage 3: [90,70,50,30,15] → fails 90,70; passes 50 → 3 points
+        assert_eq!(calc_scores(3, 100.0, 50.0, &p).clean_points, 3);
+        // Stage 5: [95,80,60,40,25] → fails 95,80,60; passes 40 → 2 points
+        assert_eq!(calc_scores(5, 100.0, 50.0, &p).clean_points, 2);
+    }
+
+    #[test]
+    fn calc_scores_stage_beyond_n_clamps_to_last() {
+        let p = test_scoring_params();
+        let s5 = calc_scores(5, 100.0, 50.0, &p);
+        let s6 = calc_scores(6, 100.0, 50.0, &p);
+        assert_eq!(s5.clean_points, s6.clean_points);
+    }
+
+    #[test]
+    fn sample_normal_approximate_mean_and_std() {
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(12345);
+        let n = 50_000usize;
+        let mean = 3.0f64;
+        let std = 1.5f64;
+        let samples: Vec<f64> = (0..n).map(|_| sample_normal(mean, std, &mut rng)).collect();
+        let emp_mean = samples.iter().sum::<f64>() / n as f64;
+        let emp_var = samples.iter().map(|&x| (x - emp_mean).powi(2)).sum::<f64>() / n as f64;
+        assert!((emp_mean - mean).abs() < 0.05, "mean off: {emp_mean}");
+        assert!((emp_var.sqrt() - std).abs() < 0.05, "std off: {}", emp_var.sqrt());
+    }
+}

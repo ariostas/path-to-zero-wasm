@@ -363,3 +363,177 @@ fn triplets_to_csc(m: usize, n: usize, mut entries: Vec<(usize, usize, f64)>) ->
         nzval,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::*;
+
+    fn thermal(id: usize, cap_mw: f64, var_cost: f64) -> Resource {
+        Resource {
+            id,
+            name: format!("gen_{id}"),
+            therm: 1, stor: 0, vre: 0, new_build: 1,
+            existing_cap_mw: cap_mw,
+            existing_cap_mwh: 0.0,
+            var_cost,
+            min_power: 0.0,
+            ramp_up_pct: 1.0,
+            ramp_dn_pct: 1.0,
+            eff_up: 0.0,
+            eff_down: 0.0,
+        }
+    }
+
+    fn nse() -> NseSegment {
+        NseSegment { segment: 1, nse_cost: 9000.0, nse_max: 1.0 }
+    }
+
+    // -----------------------------------------------------------------------
+    // triplets_to_csc
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn csc_diagonal() {
+        // 2×2 diagonal: (0,0,1), (1,1,2)
+        let mat = triplets_to_csc(2, 2, vec![(0, 0, 1.0), (1, 1, 2.0)]);
+        assert_eq!(mat.colptr, vec![0, 1, 2]);
+        assert_eq!(mat.rowval, vec![0, 1]);
+        assert_eq!(mat.nzval, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn csc_merges_duplicates() {
+        // Two entries at (0,0): should sum to 3.0
+        let mat = triplets_to_csc(2, 2, vec![(0, 0, 1.0), (0, 0, 2.0)]);
+        assert_eq!(mat.colptr, vec![0, 1, 1]);
+        assert_eq!(mat.rowval, vec![0]);
+        assert!((mat.nzval[0] - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn csc_unsorted_input() {
+        // Entries supplied out of column-major order
+        let entries = vec![(1, 1, 4.0), (0, 0, 1.0), (1, 0, 2.0), (0, 1, 3.0)];
+        let mat = triplets_to_csc(2, 2, entries);
+        // Col 0: rows [0,1] vals [1,2]; Col 1: rows [0,1] vals [3,4]
+        assert_eq!(mat.colptr, vec![0, 2, 4]);
+        assert_eq!(mat.rowval, vec![0, 1, 0, 1]);
+        assert_eq!(mat.nzval, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    // -----------------------------------------------------------------------
+    // solve
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn solve_single_timestep_fully_served() {
+        // 1 hour, 1 thermal resource (cap=1000 MW), demand=500 MW → no NSE
+        let inputs = SimInputs {
+            resources: vec![thermal(0, 1000.0, 10.0)],
+            demand: vec![500.0],
+            variability: vec![1.0],
+            sample_weight: vec![1.0],
+            hours_per_period: 1,
+            nse_segments: vec![nse()],
+        };
+        let r = solve(&inputs);
+        assert!(r.status.contains("Solved"), "status: {}", r.status);
+        assert!((r.gen[0] - 500.0).abs() < 1.0, "gen[0]={}", r.gen[0]);
+        assert!(r.nse[0] < 1.0, "nse[0]={}", r.nse[0]);
+        assert!((r.objective_value - 5000.0).abs() < 100.0, "obj={}", r.objective_value);
+    }
+
+    #[test]
+    fn solve_capacity_shortfall_triggers_nse() {
+        // Demand (1000 MW) exceeds capacity (600 MW) → NSE fills the gap
+        let inputs = SimInputs {
+            resources: vec![thermal(0, 600.0, 10.0)],
+            demand: vec![1000.0],
+            variability: vec![1.0],
+            sample_weight: vec![1.0],
+            hours_per_period: 1,
+            nse_segments: vec![nse()],
+        };
+        let r = solve(&inputs);
+        assert!(r.status.contains("Solved"), "status: {}", r.status);
+        assert!((r.gen[0] - 600.0).abs() < 1.0, "gen[0]={}", r.gen[0]);
+        assert!((r.nse[0] - 400.0).abs() < 1.0, "nse[0]={}", r.nse[0]);
+    }
+
+    #[test]
+    fn solve_two_generators_prefers_cheaper() {
+        // Demand = 400 MW; two generators, cost 5 vs 30 $/MWh
+        // Optimal: all generation from cheaper resource
+        let inputs = SimInputs {
+            resources: vec![thermal(0, 700.0, 5.0), thermal(1, 700.0, 30.0)],
+            demand: vec![400.0],
+            variability: vec![1.0, 1.0],
+            sample_weight: vec![1.0],
+            hours_per_period: 1,
+            nse_segments: vec![nse()],
+        };
+        let r = solve(&inputs);
+        assert!(r.status.contains("Solved"), "status: {}", r.status);
+        assert!((r.gen[0] - 400.0).abs() < 1.0, "gen[0]={}", r.gen[0]);
+        assert!(r.gen[1] < 1.0, "gen[1]={} should be ~0", r.gen[1]);
+    }
+
+    #[test]
+    fn solve_ramp_constraint_is_respected() {
+        // 1 period of 2 hours; ramp limit = 0.1 × 1000 MW = 100 MW/hour
+        // demand = [500, 600] → optimal gen = [500, 600] (ramp = exactly 100)
+        let mut r0 = thermal(0, 1000.0, 10.0);
+        r0.ramp_up_pct = 0.1;
+        r0.ramp_dn_pct = 0.1;
+        let inputs = SimInputs {
+            resources: vec![r0],
+            demand: vec![500.0, 600.0],
+            variability: vec![1.0, 1.0],
+            sample_weight: vec![0.5, 0.5],
+            hours_per_period: 2,
+            nse_segments: vec![nse()],
+        };
+        let r = solve(&inputs);
+        assert!(r.status.contains("Solved"), "status: {}", r.status);
+        assert!((r.gen[0] - 500.0).abs() < 1.0, "gen[0]={}", r.gen[0]);
+        assert!((r.gen[1] - 600.0).abs() < 1.0, "gen[1]={}", r.gen[1]);
+        // Ramp from t=0 to t=1 must not exceed 100 MW
+        assert!(r.gen[1] - r.gen[0] <= 100.0 + 1.0, "ramp={}", r.gen[1] - r.gen[0]);
+    }
+
+    #[test]
+    fn solve_storage_shifts_load_no_nse() {
+        // 2-hour period; without storage, peak demand (800 MW) would require NSE.
+        // Battery (cap=300 MW, MWh=1200, 100% efficiency) charges at t=0 and
+        // discharges at t=1, allowing flat generation and zero NSE.
+        let gen = thermal(0, 700.0, 10.0);
+        let bat = Resource {
+            id: 1,
+            name: "battery".to_string(),
+            therm: 0, stor: 1, vre: 0, new_build: 1,
+            existing_cap_mw: 300.0,
+            existing_cap_mwh: 1200.0,
+            var_cost: 0.0,
+            min_power: 0.0,
+            ramp_up_pct: 1.0,
+            ramp_dn_pct: 1.0,
+            eff_up: 1.0,
+            eff_down: 1.0,
+        };
+        let inputs = SimInputs {
+            resources: vec![gen, bat],
+            demand: vec![200.0, 800.0],
+            variability: vec![1.0, 1.0, 1.0, 1.0], // [t0g0, t0g1, t1g0, t1g1]
+            sample_weight: vec![0.5, 0.5],
+            hours_per_period: 2,
+            nse_segments: vec![nse()],
+        };
+        let r = solve(&inputs);
+        assert!(r.status.contains("Solved"), "status: {}", r.status);
+        assert!(r.stor_indices.contains(&1), "battery should be a storage resource");
+        // Both time steps served without curtailment
+        assert!(r.nse[0] < 1.0, "nse[0]={}", r.nse[0]);
+        assert!(r.nse[1] < 1.0, "nse[1]={}", r.nse[1]);
+    }
+}
