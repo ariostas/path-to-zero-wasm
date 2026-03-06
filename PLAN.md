@@ -91,6 +91,46 @@ Shown after all 5 stages have been completed.
 
 ---
 
+## Solver optimizations
+
+The original Clarabel LP on the full dataset was too slow for WASM (~15 s).
+Two optimizations were applied; a third is documented for future use.
+
+### Option A — Skip non-binding ramp constraints ✓
+
+Resources with `ramp_up_pct = ramp_dn_pct = 1.0` (solar PV, distributed solar,
+onshore wind, offshore wind, battery) can never violate a ramp constraint, so
+their rows are provably redundant. Only natural gas, nuclear, and clean firm
+(ramp pct 0.2–0.5) retain ramp rows. Reduces ramp rows by ~62%.
+
+### Option B — Subsample time steps 24× ✓
+
+Keep one time step per 24 hours within each representative period (7 per week
+instead of 168), multiplying each sampled step's `sample_weight` by 24 to
+preserve annual energy totals. `hours_per_period` shrinks from 168 to 7.
+Reduces the LP from 8 735 to 364 time steps. Controlled by `STRIDE` in
+`data.rs`.
+
+**Combined result (A + B):** native release solve ~27 ms (was ~15 s);
+expect ~60–150 ms in WASM.
+
+### Option C — Merit-order dispatch (if LP is still too slow)
+
+Replace the Clarabel LP entirely with an O(n_t × n_g) heuristic:
+
+1. Sort non-storage generators by variable cost (merit order).
+2. Each hour: dispatch cheapest first up to available capacity (VRE scaled by
+   variability), accumulating unmet demand.
+3. Battery: charge when surplus exists after step 2; discharge against deficit.
+4. Remaining unmet demand → NSE.
+
+This is essentially what the LP returns for resources with no binding ramp
+constraints, so results should be nearly identical for the current dataset.
+Expected solve time: < 1 ms. To implement, add `merit_order_solve` in
+`solver.rs` and swap the two `solver::solve` calls in `engine.rs`.
+
+---
+
 ## Step 7 — Polish and optional features
 
 - Responsive CSS layout that works on tablets (primary target for classroom use).
