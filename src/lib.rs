@@ -1,5 +1,6 @@
 pub mod data;
 pub mod engine;
+pub mod screens;
 pub mod solver;
 pub mod state;
 pub mod types;
@@ -7,7 +8,8 @@ pub mod types;
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 
-use state::GameState;
+use screens::SetupScreen;
+use state::{GameState, Screen};
 
 #[wasm_bindgen(start)]
 pub fn main() {
@@ -27,7 +29,17 @@ fn App() -> impl IntoView {
             <h2>"The Electricity Decarbonization Game"</h2>
         </header>
         <div class="container">
-            <p>"Loading..."</p>
+            {move || match game.get() {
+                None => view! { <SetupScreen /> }.into_any(),
+                Some(gs) => match gs.screen {
+                    Screen::Planning =>
+                        view! { <p>"Planning screen — coming soon"</p> }.into_any(),
+                    Screen::StageResults =>
+                        view! { <p>"Results screen — coming soon"</p> }.into_any(),
+                    Screen::EndGame =>
+                        view! { <p>"End game screen — coming soon"</p> }.into_any(),
+                },
+            }}
         </div>
     }
 }
