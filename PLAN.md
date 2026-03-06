@@ -103,7 +103,9 @@ onshore wind, offshore wind, battery) can never violate a ramp constraint, so
 their rows are provably redundant. Only natural gas, nuclear, and clean firm
 (ramp pct 0.2–0.5) retain ramp rows. Reduces ramp rows by ~62%.
 
-### Option B — Subsample time steps 24× ✓
+### Option B — Subsample time steps 24× (reverted)
+
+Was implemented but reverted in favour of Option C.
 
 Keep one time step per 24 hours within each representative period (7 per week
 instead of 168), multiplying each sampled step's `sample_weight` by 24 to
@@ -111,10 +113,9 @@ preserve annual energy totals. `hours_per_period` shrinks from 168 to 7.
 Reduces the LP from 8 735 to 364 time steps. Controlled by `STRIDE` in
 `data.rs`.
 
-**Combined result (A + B):** native release solve ~27 ms (was ~15 s);
-expect ~60–150 ms in WASM.
+**Combined result (A + B, now reverted):** native release solve ~27 ms (was ~15 s).
 
-### Option C — Merit-order dispatch (if LP is still too slow)
+### Option C — Merit-order dispatch ✓
 
 Replace the Clarabel LP entirely with an O(n_t × n_g) heuristic:
 
@@ -126,8 +127,8 @@ Replace the Clarabel LP entirely with an O(n_t × n_g) heuristic:
 
 This is essentially what the LP returns for resources with no binding ramp
 constraints, so results should be nearly identical for the current dataset.
-Expected solve time: < 1 ms. To implement, add `merit_order_solve` in
-`solver.rs` and swap the two `solver::solve` calls in `engine.rs`.
+**Result:** 0.57 ms native on full 8 736-step dataset (vs 692 ms for Clarabel LP).
+Implemented in `solver::merit_order_solve`; active in `engine.rs`.
 
 ---
 
