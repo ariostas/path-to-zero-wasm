@@ -1,10 +1,13 @@
 pub mod data;
 pub mod engine;
 pub mod solver;
+pub mod state;
 pub mod types;
 
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
+
+use state::GameState;
 
 #[wasm_bindgen(start)]
 pub fn main() {
@@ -14,6 +17,10 @@ pub fn main() {
 
 #[component]
 fn App() -> impl IntoView {
+    // None = Setup screen; Some(GameState) = in-game.
+    let game: RwSignal<Option<GameState>> = RwSignal::new(None);
+    provide_context(game);
+
     view! {
         <header>
             <h1>"Path to Zero"</h1>
