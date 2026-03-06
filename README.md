@@ -1,8 +1,12 @@
 # Path to Zero — Rust/WASM
 
+**Live demo:** https://ariostas.github.io/path-to-zero-wasm/
+
 This is a Rust rewrite of [Path to Zero: The Electricity Decarbonization Game](https://github.com/PrincetonZEROLab/Path-to-Zero/), originally built in Julia using the Genie web framework and HiGHS solver.
 
 The goal of the rewrite is to produce a **fully static website** that runs entirely in the browser with no server required, using WebAssembly for the compute-intensive LP dispatch simulation.
+
+> **Note:** This port was developed as an experiment using [Claude Code](https://claude.ai/code) (Anthropic's AI coding assistant). The AI wrote the majority of the Rust/Leptos code, guided by the original Julia implementation and human review.
 
 ## Technology stack
 
