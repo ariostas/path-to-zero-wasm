@@ -33,7 +33,7 @@ custom YAML file.
 
 ---
 
-## Step 3 — Stage planning screen
+## Step 3 — Stage planning screen ✓
 
 The main gameplay loop, repeated once per stage (5 total).
 
@@ -49,7 +49,7 @@ The main gameplay loop, repeated once per stage (5 total).
 
 ---
 
-## Step 4 — Dispatch and results visualization
+## Step 4 — Dispatch and results visualization ✓
 
 Shown after advancing each stage; summarises what happened.
 
@@ -64,7 +64,7 @@ Shown after advancing each stage; summarises what happened.
 
 ---
 
-## Step 5 — Uncertainty and update narrative
+## Step 5 — Uncertainty and update narrative ✓
 
 Displayed alongside the Stage Results, describing the random events that occurred.
 
@@ -79,7 +79,7 @@ Displayed alongside the Stage Results, describing the random events that occurre
 
 ---
 
-## Step 6 — End-game summary
+## Step 6 — End-game summary ✓
 
 Shown after all 5 stages have been completed.
 

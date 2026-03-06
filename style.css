@@ -501,6 +501,13 @@ header h2 {
     padding-bottom: 24px;
 }
 
+/* End-game screen */
+.endgame-section-title {
+    font-size: 1rem;
+    font-weight: bold;
+    color: rgb(16, 16, 129);
+}
+
 /* Uncertainty narrative */
 .narrative-section {
     border: 1px solid #ddd;
