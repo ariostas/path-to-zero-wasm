@@ -106,6 +106,17 @@ pub fn solve(inputs: &SimInputs) -> SolverResult {
         .collect();
     let n_stor = stor_indices.len();
 
+    // Only add ramp constraints for resources whose ramp limit could be binding
+    // (ramp_up_pct < 1.0 or ramp_dn_pct < 1.0). For fully-flexible resources
+    // (solar, wind, battery) the constraint is never active and can be dropped.
+    let ramp_resources: Vec<usize> = (0..n_g)
+        .filter(|&g| {
+            inputs.resources[g].ramp_up_pct < 1.0
+                || inputs.resources[g].ramp_dn_pct < 1.0
+        })
+        .collect();
+    let n_ramp_g = ramp_resources.len();
+
     // Variable layout (flat offset into the LP variable vector)
     let gen_off = 0usize;
     let charge_off = n_t * n_g;
@@ -156,11 +167,11 @@ pub fn solve(inputs: &SimInputs) -> SolverResult {
     let iq_max_charge = iq_max_power + n_t * n_g; // n_t * n_stor
     let iq_max_soc = iq_max_charge + n_t * n_stor; // n_t * n_stor
     let iq_max_nse = iq_max_soc + n_t * n_stor; // n_t * n_s
-    let iq_ramp_up_int = iq_max_nse + n_t * n_s; // n_interior * n_g
-    let iq_ramp_up_wrap = iq_ramp_up_int + n_interior * n_g; // n_periods * n_g
-    let iq_ramp_dn_int = iq_ramp_up_wrap + n_periods * n_g; // n_interior * n_g
-    let iq_ramp_dn_wrap = iq_ramp_dn_int + n_interior * n_g; // n_periods * n_g
-    let n_ineq = iq_ramp_dn_wrap + n_periods * n_g;
+    let iq_ramp_up_int = iq_max_nse + n_t * n_s; // n_interior * n_ramp_g
+    let iq_ramp_up_wrap = iq_ramp_up_int + n_interior * n_ramp_g; // n_periods * n_ramp_g
+    let iq_ramp_dn_int = iq_ramp_up_wrap + n_periods * n_ramp_g; // n_interior * n_ramp_g
+    let iq_ramp_dn_wrap = iq_ramp_dn_int + n_interior * n_ramp_g; // n_periods * n_ramp_g
+    let n_ineq = iq_ramp_dn_wrap + n_periods * n_ramp_g;
 
     let n_rows = n_eq + n_ineq;
     let ib = n_eq; // inequality row base offset
@@ -288,7 +299,7 @@ pub fn solve(inputs: &SimInputs) -> SolverResult {
         }
     }
 
-    // 9+11. Ramp interior (t % h != 0)
+    // 9+11. Ramp interior (t % h != 0) — only for resources with ramp_pct < 1.0
     // Ramp up:   vGEN_shifted[t,g] - vGEN_shifted[t-1,g] ≤ ramp_up * cap[g]
     // Ramp down: vGEN_shifted[t-1,g] - vGEN_shifted[t,g] ≤ ramp_dn * cap[g]
     let mut int_idx = 0usize;
@@ -296,15 +307,15 @@ pub fn solve(inputs: &SimInputs) -> SolverResult {
         if t % h == 0 {
             continue;
         }
-        for g in 0..n_g {
+        for (ri, &g) in ramp_resources.iter().enumerate() {
             let cap = inputs.resources[g].existing_cap_mw;
 
-            let row_up = ib + iq_ramp_up_int + int_idx * n_g + g;
+            let row_up = ib + iq_ramp_up_int + int_idx * n_ramp_g + ri;
             triplets.push((row_up, gen_off + t * n_g + g, 1.0));
             triplets.push((row_up, gen_off + (t - 1) * n_g + g, -1.0));
             b[row_up] = inputs.resources[g].ramp_up_pct * cap;
 
-            let row_dn = ib + iq_ramp_dn_int + int_idx * n_g + g;
+            let row_dn = ib + iq_ramp_dn_int + int_idx * n_ramp_g + ri;
             triplets.push((row_dn, gen_off + (t - 1) * n_g + g, 1.0));
             triplets.push((row_dn, gen_off + t * n_g + g, -1.0));
             b[row_dn] = inputs.resources[g].ramp_dn_pct * cap;
@@ -318,15 +329,15 @@ pub fn solve(inputs: &SimInputs) -> SolverResult {
     for k in 0..n_periods {
         let t = k * h;
         let wrap_t = t + h - 1;
-        for g in 0..n_g {
+        for (ri, &g) in ramp_resources.iter().enumerate() {
             let cap = inputs.resources[g].existing_cap_mw;
 
-            let row_up = ib + iq_ramp_up_wrap + k * n_g + g;
+            let row_up = ib + iq_ramp_up_wrap + k * n_ramp_g + ri;
             triplets.push((row_up, gen_off + t * n_g + g, 1.0));
             triplets.push((row_up, gen_off + wrap_t * n_g + g, -1.0));
             b[row_up] = inputs.resources[g].ramp_up_pct * cap;
 
-            let row_dn = ib + iq_ramp_dn_wrap + k * n_g + g;
+            let row_dn = ib + iq_ramp_dn_wrap + k * n_ramp_g + ri;
             triplets.push((row_dn, gen_off + wrap_t * n_g + g, 1.0));
             triplets.push((row_dn, gen_off + t * n_g + g, -1.0));
             b[row_dn] = inputs.resources[g].ramp_dn_pct * cap;
