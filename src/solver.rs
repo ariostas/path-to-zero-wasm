@@ -79,6 +79,119 @@ pub fn dummy_solve(inputs: &SimInputs) -> SolverResult {
     }
 }
 
+/// Merit-order economic dispatch with a simple battery heuristic.
+///
+/// For each hour:
+///   1. Dispatch non-storage resources cheapest-first up to demand.
+///   2. If VRE produced a surplus, charge battery (up to power and energy limits).
+///      If there is a deficit after thermal dispatch, discharge battery.
+///   3. Any remaining unmet demand → NSE segment 0.
+///
+/// Battery SOC resets to zero at the start of each representative period,
+/// matching the LP's periodic boundary condition.
+pub fn merit_order_solve(inputs: &SimInputs) -> SolverResult {
+    let n_t = inputs.demand.len();
+    let n_g = inputs.resources.len();
+    let n_s = inputs.nse_segments.len();
+    let h = inputs.hours_per_period;
+
+    let stor_indices: Vec<usize> = inputs
+        .resources
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.stor >= 1)
+        .map(|(i, _)| i)
+        .collect();
+    let n_stor = stor_indices.len();
+
+    // Non-storage resources sorted cheapest first.
+    let mut dispatch_order: Vec<usize> = (0..n_g)
+        .filter(|g| !stor_indices.contains(g))
+        .collect();
+    dispatch_order.sort_by(|&a, &b| {
+        inputs.resources[a]
+            .var_cost
+            .partial_cmp(&inputs.resources[b].var_cost)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut gen = vec![0.0f64; n_t * n_g];
+    let mut charge_out = vec![0.0f64; n_t * n_stor];
+    let mut soc_out = vec![0.0f64; n_t * n_stor];
+    let mut nse = vec![0.0f64; n_t * n_s];
+
+    // SOC (MWh) for each storage resource, reset at each period boundary.
+    let mut period_soc = vec![0.0f64; n_stor];
+
+    for t in 0..n_t {
+        if t % h == 0 {
+            for s in &mut period_soc {
+                *s = 0.0;
+            }
+        }
+
+        let demand_mw = inputs.demand[t];
+
+        // --- Step 1: merit-order dispatch of non-storage resources ---
+        let mut total_gen = 0.0f64;
+        for &g in &dispatch_order {
+            let res = &inputs.resources[g];
+            let cf = if res.vre >= 1 {
+                inputs.variability[t * n_g + g]
+            } else {
+                1.0
+            };
+            let available = res.existing_cap_mw * cf;
+            let dispatch = available.min((demand_mw - total_gen).max(0.0));
+            gen[t * n_g + g] = dispatch;
+            total_gen += dispatch;
+        }
+
+        // --- Step 2: battery ---
+        let balance = total_gen - demand_mw; // >0 surplus, <0 deficit
+        for (sl, &sg) in stor_indices.iter().enumerate() {
+            let res = &inputs.resources[sg];
+            let cap_mw = res.existing_cap_mw;
+            let cap_mwh = res.existing_cap_mwh;
+            let eff_up = res.eff_up.max(1e-6);
+            let eff_dn = res.eff_down.max(1e-6);
+
+            if balance > 0.0 {
+                // Surplus → charge
+                let headroom = (cap_mwh - period_soc[sl]) / eff_up;
+                let charge_mw = balance.min(cap_mw).min(headroom).max(0.0);
+                charge_out[t * n_stor + sl] = charge_mw;
+                period_soc[sl] += charge_mw * eff_up;
+            } else if balance < 0.0 {
+                // Deficit → discharge
+                let available_energy = period_soc[sl] * eff_dn;
+                let discharge = (-balance).min(cap_mw).min(available_energy).max(0.0);
+                gen[t * n_g + sg] = discharge;
+                period_soc[sl] -= discharge / eff_dn;
+            }
+            soc_out[t * n_stor + sl] = period_soc[sl];
+        }
+
+        // --- Step 3: NSE for any remaining deficit ---
+        let served: f64 = (0..n_g).map(|g| gen[t * n_g + g]).sum();
+        let deficit = (demand_mw - served).max(0.0);
+        if deficit > 0.0 && n_s > 0 {
+            let max_nse = inputs.nse_segments[0].nse_max * demand_mw;
+            nse[t * n_s] = deficit.min(max_nse);
+        }
+    }
+
+    SolverResult {
+        gen,
+        charge: charge_out,
+        soc: soc_out,
+        nse,
+        objective_value: 0.0,
+        status: "merit_order".to_string(),
+        stor_indices,
+    }
+}
+
 /// Solve the LP economic dispatch using Clarabel.
 ///
 /// Maps the JuMP/HiGHS model from EDG_engine.jl to Clarabel's standard form:
@@ -597,9 +710,14 @@ mod tests {
         );
 
         let t0 = Instant::now();
+        let sol = merit_order_solve(&inputs);
+        let elapsed = t0.elapsed();
+        println!("merit_order_solve() returned {:?} in {:.6}s", sol.status, elapsed.as_secs_f64());
+
+        let t0 = Instant::now();
         let sol = solve(&inputs);
         let elapsed = t0.elapsed();
-        println!("solve() returned {:?} in {:.3}s", sol.status, elapsed.as_secs_f64());
+        println!("solve() (Clarabel LP) returned {:?} in {:.3}s", sol.status, elapsed.as_secs_f64());
     }
 
     #[test]

@@ -20,7 +20,7 @@ pub fn run_simulation(
     let mut inputs = load_sim_inputs(planning_year, resource_params, is_new_nuclear);
     apply_clean_firm_gate(&mut inputs, shaping_tokens);
 
-    let sol = solver::solve(&inputs);
+    let sol = solver::merit_order_solve(&inputs);
     let (resource_results, nse_result, dispatch) = compute_results(&inputs, &sol);
 
     let clean_share = 100.0
@@ -68,7 +68,7 @@ pub fn advance_stage(
         &mut rng,
     );
 
-    let sol = solver::solve(&inputs);
+    let sol = solver::merit_order_solve(&inputs);
     let (resource_results, nse_result, dispatch) = compute_results(&inputs, &sol);
 
     let clean_share = 100.0
