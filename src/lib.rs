@@ -23,22 +23,21 @@ fn App() -> impl IntoView {
     let game: RwSignal<Option<GameState>> = RwSignal::new(None);
     provide_context(game);
 
+    // Route on the current screen only, so that ordinary state changes (e.g.
+    // allocating a token) update the page in place instead of rebuilding it.
+    let screen = Memo::new(move |_| game.with(|opt| opt.as_ref().map(|gs| gs.screen)));
+
     view! {
         <header>
             <h1>"Path to Zero"</h1>
             <h2>"The Electricity Decarbonization Game"</h2>
         </header>
         <div class="container">
-            {move || match game.get() {
+            {move || match screen.get() {
                 None => view! { <SetupScreen /> }.into_any(),
-                Some(gs) => match gs.screen {
-                    Screen::Planning =>
-                        view! { <PlanningScreen /> }.into_any(),
-                    Screen::StageResults =>
-                        view! { <StageResultsScreen /> }.into_any(),
-                    Screen::EndGame =>
-                        view! { <EndGameScreen /> }.into_any(),
-                },
+                Some(Screen::Planning) => view! { <PlanningScreen /> }.into_any(),
+                Some(Screen::StageResults) => view! { <StageResultsScreen /> }.into_any(),
+                Some(Screen::EndGame) => view! { <EndGameScreen /> }.into_any(),
             }}
         </div>
     }

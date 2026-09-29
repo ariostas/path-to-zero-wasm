@@ -2,8 +2,106 @@ use leptos::prelude::*;
 use leptos_chartistry::*;
 
 use super::planning::generation_table;
+use super::{act, read, use_game};
 use crate::state::GameState;
 use crate::types::*;
+
+/// Hours per chart week and weeks per year in the dispatch data.
+const HOURS_PER_WEEK: usize = 168;
+const WEEKS: usize = 52;
+
+/// One point of the dispatch chart (GW), `x` in days since the year start.
+#[derive(Debug, Clone, Default)]
+struct ChartPoint {
+    day: f64,
+    generation: [f64; N_RESOURCES],
+    /// Charging power as a negative number.
+    battery_charge: f64,
+    nonserved: f64,
+    demand: f64,
+}
+
+impl ChartPoint {
+    fn from_hour(d: &DispatchHour) -> Self {
+        Self {
+            day: d.hour as f64 / 24.0,
+            generation: d.generation,
+            battery_charge: d.storage_charge,
+            nonserved: d.nonserved,
+            demand: d.demand_gw,
+        }
+    }
+
+    /// Average of a run of hours, plotted at the start of the run.
+    fn average(hours: &[DispatchHour]) -> Self {
+        let n = hours.len().max(1) as f64;
+        let mut p = Self { day: hours.first().map_or(0.0, |h| h.hour as f64 / 24.0), ..Self::default() };
+        for h in hours {
+            for (acc, g) in p.generation.iter_mut().zip(h.generation) {
+                *acc += g / n;
+            }
+            p.battery_charge += h.storage_charge / n;
+            p.nonserved += h.nonserved / n;
+            p.demand += h.demand_gw / n;
+        }
+        p
+    }
+}
+
+/// Chart points for `week` (1-based), or daily averages for the full year
+/// when `week == 0`.
+fn chart_points(dispatch: &[DispatchHour], week: usize) -> Vec<ChartPoint> {
+    if week == 0 {
+        dispatch.chunks(24).map(ChartPoint::average).collect()
+    } else {
+        let start = ((week - 1) * HOURS_PER_WEEK).min(dispatch.len());
+        let end = (start + HOURS_PER_WEEK).min(dispatch.len());
+        dispatch[start..end].iter().map(ChartPoint::from_hour).collect()
+    }
+}
+
+/// Stack order (bottom to top) and colours, matching the original game.
+const STACK: [(&str, Colour); N_RESOURCES] = [
+    ("nuclear", Colour::from_rgb(0x8c, 0x56, 0x4b)),
+    ("clean_firm", Colour::from_rgb(0x17, 0xbe, 0xcf)),
+    ("onshore_wind", Colour::from_rgb(0x2c, 0xa0, 0x2c)),
+    ("offshore_wind", Colour::from_rgb(0x1f, 0x77, 0xb4)),
+    ("solar_pv", Colour::from_rgb(0xeb, 0xc3, 0x34)),
+    ("distributed_solar", Colour::from_rgb(0xff, 0x7f, 0x0e)),
+    ("battery", Colour::from_rgb(0xe3, 0x77, 0xc2)),
+    ("natural_gas", Colour::from_rgb(0xd6, 0x27, 0x28)),
+];
+
+fn dispatch_series() -> Series<ChartPoint, f64, f64> {
+    let mut stack = Stack::new();
+    for (name, colour) in STACK {
+        let g = resource_index(name).expect("known resource");
+        stack = stack.line(
+            Line::new(move |p: &ChartPoint| p.generation[g])
+                .with_name(resource_label(name))
+                .with_colour(colour),
+        );
+    }
+    stack = stack.line(
+        Line::new(|p: &ChartPoint| p.nonserved)
+            .with_name("Unmet Demand")
+            .with_colour(Colour::from_rgb(0, 0, 0)),
+    );
+
+    Series::new(|p: &ChartPoint| p.day)
+        .stack(stack)
+        .line(
+            Line::new(|p: &ChartPoint| p.battery_charge)
+                .with_name("Battery Charging")
+                .with_colour(Colour::from_rgb(0x94, 0x67, 0xbd)),
+        )
+        .line(
+            Line::new(|p: &ChartPoint| p.demand)
+                .with_name("Demand")
+                .with_colour(Colour::from_rgb(0x55, 0x55, 0x55))
+                .with_width(2.0),
+        )
+}
 
 // -----------------------------------------------------------------------
 // StageResultsScreen
@@ -11,53 +109,32 @@ use crate::types::*;
 
 #[component]
 pub fn StageResultsScreen() -> impl IntoView {
-    let game = use_context::<RwSignal<Option<GameState>>>().expect("game context");
+    let game = use_game();
 
-    // Dispatch data fed into the chart; re-derived whenever game changes.
-    let dispatch_data: Signal<Vec<DispatchHour>> = Signal::derive(move || {
+    // 0 = full year (daily averages); 1..=52 = a single week, hourly.
+    let chart_week = RwSignal::new(0usize);
+
+    let chart_data: Signal<Vec<ChartPoint>> = Signal::derive(move || {
+        let week = chart_week.get();
         game.with(|opt| {
-            opt.as_ref()
-                .and_then(|gs| gs.last_stage_results.as_ref())
-                .map(|(sr, _, _)| sr.dispatch.clone())
-                .unwrap_or_default()
+            let (sr, _, _) = opt.as_ref()?.last_stage_results.as_ref()?;
+            Some(chart_points(&sr.dispatch, week))
         })
+        .unwrap_or_default()
     });
 
-    // Stacked area series — one band per resource plus unmet demand.
-    let series = Series::new(|d: &DispatchHour| d.hour as f64)
-        .stack(
-            Stack::new()
-                .line(Line::new(|d: &DispatchHour| d.generation[0]).with_name("Natural Gas"))
-                .line(Line::new(|d: &DispatchHour| d.generation[1]).with_name("Nuclear"))
-                .line(Line::new(|d: &DispatchHour| d.generation[2]).with_name("Solar PV"))
-                .line(Line::new(|d: &DispatchHour| d.generation[3]).with_name("Dist. Solar"))
-                .line(Line::new(|d: &DispatchHour| d.generation[4]).with_name("Onshore Wind"))
-                .line(Line::new(|d: &DispatchHour| d.generation[5]).with_name("Offshore Wind"))
-                .line(Line::new(|d: &DispatchHour| d.generation[6]).with_name("Battery"))
-                .line(Line::new(|d: &DispatchHour| d.generation[7]).with_name("Clean Firm"))
-                .line(Line::new(|d: &DispatchHour| d.nonserved).with_name("Unmet Demand")),
-        );
-
-    // Demand overlay line
-    let series = series
-        .line(Line::new(|d: &DispatchHour| d.demand_gw).with_name("Demand"));
-
-    // Continue action: Planning if more stages remain, EndGame otherwise.
-    let on_continue = move |_| {
-        game.update(|opt| {
-            if let Some(gs) = opt {
-                gs.continue_from_results();
-            }
-        });
-    };
+    let week_options = std::iter::once(view! { <option value="0">"Full year (daily average)"</option> }.into_any())
+        .chain((1..=WEEKS).map(|w| {
+            view! { <option value=w.to_string()>{format!("Week {w} (hourly)")}</option> }.into_any()
+        }))
+        .collect_view();
 
     // ---- View ----
     view! {
         <div class="results-screen">
 
             // --- Stage header ---
-            {move || game.with(|opt| {
-                let gs = opt.as_ref().unwrap();
+            {move || read(game, |gs| {
                 let completed = gs.stage_history.len();
                 let year = gs.setup.stages[completed.saturating_sub(1).min(N_STAGES - 1)];
                 view! {
@@ -69,7 +146,7 @@ pub fn StageResultsScreen() -> impl IntoView {
 
             // --- Score + reliability summary row ---
             {move || game.with(|opt| {
-                let gs = opt.as_ref().unwrap();
+                let gs = opt.as_ref()?;
                 let (sr, _, _) = gs.last_stage_results.as_ref()?;
                 let scores = sr.scores.clone();
                 let nse = sr.nse_result.clone();
@@ -138,20 +215,32 @@ pub fn StageResultsScreen() -> impl IntoView {
             })}
 
             // --- Dispatch chart ---
+            <div class="chart-controls">
+                <label>
+                    "Show: "
+                    <select
+                        prop:value=move || chart_week.get().to_string()
+                        on:change=move |ev| chart_week.set(event_target_value(&ev).parse().unwrap_or(0))
+                    >
+                        {week_options}
+                    </select>
+                </label>
+            </div>
             <div class="chart-container">
                 <Chart
                     aspect_ratio=AspectRatio::from_outer_ratio(900.0, 350.0)
-                    top=RotatedLabel::middle("Hourly Dispatch (GW)")
+                    top=RotatedLabel::middle("Dispatch (GW)")
                     left=TickLabels::aligned_floats()
-                    bottom=RotatedLabel::middle("Hour")
+                    bottom=vec![TickLabels::aligned_floats().into_edge(), RotatedLabel::middle("Day of year").into_edge()]
                     right=Legend::end()
                     inner=[
                         AxisMarker::left_edge().into_inner(),
                         AxisMarker::bottom_edge().into_inner(),
                         XGuideLine::over_data().into_inner(),
                     ]
-                    series=series
-                    data=dispatch_data
+                    tooltip=Tooltip::left_cursor()
+                    series=dispatch_series()
+                    data=chart_data
                 />
             </div>
 
@@ -163,11 +252,9 @@ pub fn StageResultsScreen() -> impl IntoView {
                 let shock_pct = sr.uncertainty.demand_shock_percent;
                 let disaster = sr.uncertainty.disaster;
                 let outage_week = sr.uncertainty.outage_week;
-                let forced_outages = sr.uncertainty.forced_outages;
-                let backlash_flags = backlash.backlash;
-                let exp_rates = experience.experience_rate;
 
-                let disaster_resources: Vec<String> = forced_outages
+                // Forced outages are in CSV order.
+                let disaster_resources: Vec<String> = sr.uncertainty.forced_outages
                     .iter()
                     .enumerate()
                     .filter(|(_, &fo)| fo)
@@ -177,14 +264,14 @@ pub fn StageResultsScreen() -> impl IntoView {
                 // Backlash and experience arrays are in block order.
                 let block_label = |g: usize| resource_label(&gs.resource_params.names[g]).to_string();
 
-                let backlash_resources: Vec<String> = backlash_flags
+                let backlash_resources: Vec<String> = backlash.backlash
                     .iter()
                     .enumerate()
                     .filter(|(_, &b)| b)
                     .map(|(g, _)| block_label(g))
                     .collect();
 
-                let exp_items: Vec<(String, f64)> = exp_rates
+                let exp_items: Vec<(String, f64)> = experience.experience_rate
                     .iter()
                     .enumerate()
                     .filter(|(_, &r)| r > 0.0)
@@ -197,41 +284,37 @@ pub fn StageResultsScreen() -> impl IntoView {
                     format!("{:.1}% lower demand than expected", shock_pct)
                 };
 
-                let disaster_text = if disaster {
+                let disaster_text = disaster.then(|| {
                     let res = if disaster_resources.is_empty() {
                         "no resources affected".to_string()
                     } else {
                         disaster_resources.join(", ")
                     };
-                    Some(format!(
-                        "Extreme weather event in week {} — forced outages: {}",
-                        outage_week, res
-                    ))
-                } else {
-                    None
-                };
+                    format!(
+                        "Extreme weather in weeks {}–{} — forced outages: {}",
+                        outage_week,
+                        outage_week + 3,
+                        res
+                    )
+                });
 
-                let backlash_text = if backlash_resources.is_empty() {
-                    None
-                } else {
-                    Some(format!(
+                let backlash_text = (!backlash_resources.is_empty()).then(|| {
+                    format!(
                         "{} locked for the next stage due to social backlash",
                         backlash_resources.join(", ")
-                    ))
-                };
+                    )
+                });
 
-                let exp_text = if exp_items.is_empty() {
-                    None
-                } else {
-                    Some(format!(
-                        "Build cost reductions: {}",
+                let exp_text = (!exp_items.is_empty()).then(|| {
+                    format!(
+                        "Experience gains (GW per build token grows by this per token spent): {}",
                         exp_items
                             .iter()
-                            .map(|(n, r)| format!("{} \u{2212}{:.1}%", n, r))
+                            .map(|(n, r)| format!("{} +{:.1}%", n, r))
                             .collect::<Vec<_>>()
                             .join("; ")
-                    ))
-                };
+                    )
+                });
 
                 Some(view! {
                     <div class="narrative-section mt-16">
@@ -258,14 +341,9 @@ pub fn StageResultsScreen() -> impl IntoView {
 
             // --- Continue button ---
             <div class="results-actions mt-16">
-                <button class="btn btn-primary" on:click=on_continue>
-                    {move || game.with(|opt| {
-                        let gs = opt.as_ref().unwrap();
-                        if gs.stage_history.len() < N_STAGES {
-                            "Continue to Next Stage"
-                        } else {
-                            "See Final Results"
-                        }
+                <button class="btn btn-primary" on:click=move |_| act(game, GameState::continue_from_results)>
+                    {move || read(game, |gs| {
+                        if gs.is_game_over() { "See Final Results" } else { "Continue to Next Stage" }
                     })}
                 </button>
             </div>

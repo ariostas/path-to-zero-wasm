@@ -1,6 +1,7 @@
 use crate::types::*;
 use csv::ReaderBuilder;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 
 // ---------------------------------------------------------------------------
@@ -357,6 +358,37 @@ fn parse_variability(csv_str: &str, n_t: usize) -> Vec<f64> {
     variability
 }
 
+/// Parsed CSV data for one planning year.
+struct YearData {
+    resources: Vec<ResourceCsvRow>,
+    demand: DemandParsed,
+    variability: Vec<f64>,
+}
+
+/// Planning years with embedded input data.
+pub const DATA_YEARS: [u32; 5] = [2030, 2035, 2040, 2045, 2050];
+
+/// Parsed data for `year`, parsed on first use and cached for the session.
+fn year_data(year: u32) -> &'static YearData {
+    static CACHE: [OnceLock<YearData>; DATA_YEARS.len()] =
+        [const { OnceLock::new() }; DATA_YEARS.len()];
+    let idx = DATA_YEARS
+        .iter()
+        .position(|&y| y == year)
+        .unwrap_or_else(|| panic!("Invalid planning year: {year}"));
+    CACHE[idx].get_or_init(|| {
+        let csvs = year_csvs(year);
+        let fuels = parse_fuels(csvs.fuels);
+        let demand = parse_demand(csvs.load);
+        let n_t = demand.time_index.len();
+        YearData {
+            resources: parse_resources(csvs.resources, &fuels),
+            variability: parse_variability(csvs.variability, n_t),
+            demand,
+        }
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -371,12 +403,9 @@ pub fn load_sim_inputs(
     resource_params: &ResourceParams,
     is_new_nuclear: bool,
 ) -> SimInputs {
-    let csvs = year_csvs(year);
-    let fuels = parse_fuels(csvs.fuels);
-    let mut csv_resources = parse_resources(csvs.resources, &fuels);
-    let demand = parse_demand(csvs.load);
-    let n_t = demand.time_index.len();
-    let variability = parse_variability(csvs.variability, n_t);
+    let data = year_data(year);
+    let mut csv_resources = data.resources.clone();
+    let demand = &data.demand;
 
     // --- Apply capacity overrides from resource_params ---
     // resource_params are indexed by *game block order* via names[].
@@ -454,11 +483,11 @@ pub fn load_sim_inputs(
 
     SimInputs {
         resources,
-        demand: demand.load_mw_z1,
-        variability,
-        sample_weight: demand.sample_weight,
+        demand: demand.load_mw_z1.clone(),
+        variability: data.variability.clone(),
+        sample_weight: demand.sample_weight.clone(),
         hours_per_period: demand.hours_per_period,
-        nse_segments: demand.nse_segments,
+        nse_segments: demand.nse_segments.clone(),
     }
 }
 

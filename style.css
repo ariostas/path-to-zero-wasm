@@ -206,6 +206,12 @@ header h2 {
     cursor: not-allowed;
 }
 
+/* Chart controls */
+.chart-controls {
+    margin: 8px 0;
+    font-size: 0.9rem;
+}
+
 /* Chart container */
 .chart-container {
     width: 100%;
