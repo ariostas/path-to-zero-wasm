@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::state::GameState;
+use crate::state::{GameState, AFFORDABILITY_POINTS_PER_TOKEN};
 use crate::types::*;
 
 #[component]
@@ -17,11 +17,26 @@ pub fn EndGameScreen() -> impl IntoView {
             // --- Header + total score ---
             {move || game.with(|opt| {
                 let gs = opt.as_ref()?;
-                let total = gs.total_score();
+                let stage_points = gs.total_score();
+                let affordability = gs.affordability_points();
+                let penalty = gs.backlash_penalty();
                 Some(view! {
                     <h2 class="results-title">"Game Complete — Final Results"</h2>
-                    <div class="final-score">{total}</div>
-                    <div class="mb-16">"Total Score"</div>
+                    <div class="final-score">{gs.final_score()}</div>
+                    <div class="mb-8">"Total Score"</div>
+                    <table class="score-table final-breakdown mb-16">
+                        <tbody>
+                            <tr><td>"Stage points"</td><td class="text-center">{stage_points}</td></tr>
+                            <tr>
+                                <td>{format!("Affordability ({} budget tokens × {})", gs.budget_tokens, AFFORDABILITY_POINTS_PER_TOKEN)}</td>
+                                <td class="text-center">{format!("+{affordability}")}</td>
+                            </tr>
+                            <tr>
+                                <td>"Social backlash on new resources"</td>
+                                <td class="text-center">{format!("−{penalty}")}</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 })
             })}
 

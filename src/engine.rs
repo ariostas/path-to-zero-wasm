@@ -23,12 +23,7 @@ pub fn run_simulation(
     let sol = solver::dispatch(&inputs);
     let (resource_results, nse_result, dispatch) = compute_results(&inputs, &sol);
 
-    let clean_share = 100.0
-        - resource_results
-            .iter()
-            .find(|r| r.resource == "natural_gas")
-            .map(|r| r.percent_gwh)
-            .unwrap_or(0.0);
+    let clean_share = clean_share(&resource_results);
 
     let scores = calc_scores(stage_num, nse_result.reliability, clean_share, scoring_params);
 
@@ -71,12 +66,7 @@ pub fn advance_stage(
     let sol = solver::dispatch(&inputs);
     let (resource_results, nse_result, dispatch) = compute_results(&inputs, &sol);
 
-    let clean_share = 100.0
-        - resource_results
-            .iter()
-            .find(|r| r.resource == "natural_gas")
-            .map(|r| r.percent_gwh)
-            .unwrap_or(0.0);
+    let clean_share = clean_share(&resource_results);
 
     let scores = calc_scores(stage_num, nse_result.reliability, clean_share, scoring_params);
 
@@ -129,6 +119,16 @@ pub fn advance_stage(
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// Clean-energy share (%) = 100 − gas share of generation, rounded to one
+/// decimal before scoring as in the original game.
+fn clean_share(resource_results: &[ResourceResult]) -> f64 {
+    let gas = resource_results
+        .iter()
+        .find(|r| r.resource == "natural_gas")
+        .map_or(0.0, |r| r.percent_gwh);
+    ((100.0 - gas) * 10.0).round() / 10.0
+}
 
 /// Zero out clean-firm capacity unless the Innovation: Clean Firm shaping token is active.
 fn apply_clean_firm_gate(inputs: &mut SimInputs, shaping_tokens: &ShapingTokens) {

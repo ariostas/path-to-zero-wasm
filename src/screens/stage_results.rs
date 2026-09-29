@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use leptos_chartistry::*;
 
+use super::planning::generation_table;
 use crate::state::GameState;
 use crate::types::*;
 
@@ -214,7 +215,7 @@ pub fn StageResultsScreen() -> impl IntoView {
                     None
                 } else {
                     Some(format!(
-                        "{} locked for future stages due to social backlash",
+                        "{} locked for the next stage due to social backlash",
                         backlash_resources.join(", ")
                     ))
                 };
@@ -252,42 +253,7 @@ pub fn StageResultsScreen() -> impl IntoView {
             // --- Generation mix table ---
             {move || game.with(|opt| {
                 let (sr, _, _) = opt.as_ref()?.last_stage_results.as_ref()?;
-                let resources = sr.resource_results.clone();
-                Some(view! {
-                    <table class="score-table mt-16">
-                        <thead>
-                            <tr>
-                                <th>"Resource"</th>
-                                <th>"GWh"</th>
-                                <th>"% gen"</th>
-                                <th>"Capacity (GW)"</th>
-                                <th>"Cap. factor"</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {resources.iter().enumerate().map(|(g, r)| {
-                                let label = if g < RESOURCE_LABELS.len() {
-                                    RESOURCE_LABELS[g].to_string()
-                                } else {
-                                    r.resource.clone()
-                                };
-                                let gwh = format!("{:.0}", r.gwh);
-                                let pct = format!("{:.1}%", r.percent_gwh);
-                                let cap = format!("{:.2}", r.ending_capacity_gw);
-                                let cf  = format!("{:.1}%", r.capacity_factor);
-                                view! {
-                                    <tr>
-                                        <td>{label}</td>
-                                        <td class="text-center">{gwh}</td>
-                                        <td class="text-center">{pct}</td>
-                                        <td class="text-center">{cap}</td>
-                                        <td class="text-center">{cf}</td>
-                                    </tr>
-                                }
-                            }).collect_view()}
-                        </tbody>
-                    </table>
-                })
+                Some(view! { <div class="mt-16">{generation_table(&sr.resource_results)}</div> })
             })}
 
             // --- Continue button ---

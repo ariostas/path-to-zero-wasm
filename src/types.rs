@@ -122,12 +122,68 @@ pub struct ScoringParams {
 }
 
 /// Values of the shaping-token toggles, persisted across stages.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ShapingTokensState {
     pub resilience: bool,
     pub innovation_experience: bool,
     pub innovation_clean_firm: bool,
     pub social_license: bool,
+}
+
+/// The four kinds of shaping token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShapingKind {
+    Resilience,
+    InnovationExperience,
+    InnovationCleanFirm,
+    SocialLicense,
+}
+
+impl ShapingKind {
+    pub const ALL: [ShapingKind; 4] = [
+        ShapingKind::Resilience,
+        ShapingKind::InnovationExperience,
+        ShapingKind::InnovationCleanFirm,
+        ShapingKind::SocialLicense,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ShapingKind::Resilience => "Resilience",
+            ShapingKind::InnovationExperience => "Innovation: Experience",
+            ShapingKind::InnovationCleanFirm => "Innovation: Clean Firm",
+            ShapingKind::SocialLicense => "Social License",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            ShapingKind::Resilience => "Halves the chance of forced outages during climate disasters.",
+            ShapingKind::InnovationExperience => "Doubles the expected experience-curve gains.",
+            ShapingKind::InnovationCleanFirm => "Unlocks building clean firm power from the next stage.",
+            ShapingKind::SocialLicense => "Halves the chance of social backlash.",
+        }
+    }
+}
+
+impl ShapingTokensState {
+    pub fn get(&self, kind: ShapingKind) -> bool {
+        match kind {
+            ShapingKind::Resilience => self.resilience,
+            ShapingKind::InnovationExperience => self.innovation_experience,
+            ShapingKind::InnovationCleanFirm => self.innovation_clean_firm,
+            ShapingKind::SocialLicense => self.social_license,
+        }
+    }
+
+    pub fn set(&mut self, kind: ShapingKind, value: bool) {
+        match kind {
+            ShapingKind::Resilience => self.resilience = value,
+            ShapingKind::InnovationExperience => self.innovation_experience = value,
+            ShapingKind::InnovationCleanFirm => self.innovation_clean_firm = value,
+            ShapingKind::SocialLicense => self.social_license = value,
+        }
+    }
 }
 
 /// Full game setup loaded from a YAML file.

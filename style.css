@@ -457,6 +457,48 @@ header h2 {
     border-color: #4a9;
 }
 
+/* Budget token market */
+.token-market {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.btn-sm:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.rb-status {
+    font-size: 0.78rem;
+    font-weight: bold;
+    color: rgb(200, 40, 0);
+    margin-bottom: 6px;
+}
+
+/* Shaping token toggles with descriptions */
+.shaping-item {
+    flex: 1;
+    min-width: 180px;
+    max-width: 280px;
+}
+
+.shaping-desc {
+    font-size: 0.78rem;
+    color: #555;
+    margin: 0 4px 8px;
+}
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+.final-breakdown {
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
 /* Preview panel */
 .preview-panel {
     border-top: 2px solid rgb(16, 16, 129);
