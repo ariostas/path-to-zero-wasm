@@ -363,16 +363,10 @@ impl GameState {
             return;
         }
         let (stage_results, backlash, experience) = engine::advance_stage(
+            &self.setup,
             self.current_stage_num(),
-            self.current_year(),
             &self.resource_params,
             &self.shaping_tokens(),
-            &self.setup.uncertainty_params,
-            &self.setup.scoring_params,
-            self.setup.experience_rate,
-            &self.setup.resource_blocks,
-            &self.setup.backlash_rates,
-            self.setup.is_wy_setup,
             self.is_new_nuclear(),
         );
         self.apply_stage_results(stage_results, backlash, experience);
@@ -638,10 +632,11 @@ mod tests {
         let mut gs = us_game();
         let sr = |gs: &GameState| {
             let (sr, _, ex) = crate::engine::advance_stage(
-                gs.current_stage_num(), gs.current_year(), &gs.resource_params,
-                &gs.shaping_tokens(), &gs.setup.uncertainty_params, &gs.setup.scoring_params,
-                gs.setup.experience_rate, &gs.setup.resource_blocks, &gs.setup.backlash_rates,
-                false, false,
+                &gs.setup,
+                gs.current_stage_num(),
+                &gs.resource_params,
+                &gs.shaping_tokens(),
+                false,
             );
             (sr, ex)
         };

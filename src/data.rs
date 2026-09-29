@@ -343,17 +343,12 @@ fn parse_variability(csv_str: &str, n_t: usize) -> Vec<f64> {
         .collect();
 
     let mut variability = vec![0.0f64; n_t * N_RESOURCES];
-    let mut row = 0usize;
-    for result in rdr.records() {
-        if row >= n_t {
-            break;
-        }
+    for (row, result) in rdr.records().take(n_t).enumerate() {
         let rec = result.unwrap();
         for (g, &col) in col_for_resource.iter().enumerate() {
             variability[row * N_RESOURCES + g] =
                 rec[col].trim().parse::<f64>().unwrap_or(0.0);
         }
-        row += 1;
     }
     variability
 }
@@ -794,7 +789,6 @@ fn to_arr5(v: &[f64]) -> [f64; 5] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::*;
 
     fn default_resource_params() -> ResourceParams {
         ResourceParams {

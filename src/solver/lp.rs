@@ -3,6 +3,8 @@
 //!
 //! Too slow for interactive use in WASM, so it is only compiled for tests,
 //! where it validates the fast dispatch in the parent module.
+// Index loops and the solver's A/P matrix names mirror the LP formulation.
+#![allow(clippy::needless_range_loop, non_snake_case)]
 
 use clarabel::algebra::*;
 use clarabel::solver::*;

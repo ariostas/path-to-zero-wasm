@@ -38,26 +38,21 @@ pub fn run_simulation(
 /// Full stage advance: applies uncertainty, solves, computes scores, and
 /// returns updated capacity/cost parameters for the next stage.
 pub fn advance_stage(
-    stage_num: usize,     // 1-based
-    planning_year: u32,
+    setup: &GameSetup,
+    stage_num: usize, // 1-based
     resource_params: &ResourceParams,
     shaping_tokens: &ShapingTokens,
-    uncertainty_params: &UncertaintyParams,
-    scoring_params: &ScoringParams,
-    experience_rate: f64,
-    resource_blocks: &[ResourceBlock; N_RESOURCES],
-    backlash_rates: &BacklashRates,
-    is_wy_setup: bool,
     is_new_nuclear: bool,
 ) -> (StageResults, SocialBacklash, ExperienceResults) {
     let mut rng = rand::thread_rng();
+    let planning_year = setup.stages[(stage_num - 1).min(N_STAGES - 1)];
 
     let mut inputs = load_sim_inputs(planning_year, resource_params, is_new_nuclear);
     apply_clean_firm_gate(&mut inputs, shaping_tokens);
 
     let uncertainty = resolve_uncertainty(
         &mut inputs,
-        uncertainty_params,
+        &setup.uncertainty_params,
         shaping_tokens,
         stage_num,
         &mut rng,
@@ -68,7 +63,7 @@ pub fn advance_stage(
 
     let clean_share = clean_share(&resource_results);
 
-    let scores = calc_scores(stage_num, nse_result.reliability, clean_share, scoring_params);
+    let scores = calc_scores(stage_num, nse_result.reliability, clean_share, &setup.scoring_params);
 
     // Next-stage starting capacities (GW), in block order. `inputs.resources`
     // is in CSV order, so match by name rather than by index.
@@ -83,9 +78,9 @@ pub fn advance_stage(
     let (social_backlash, mut next_build_cost, experience_results) = update_step(
         resource_params,
         shaping_tokens,
-        experience_rate,
-        resource_blocks,
-        backlash_rates,
+        setup.experience_rate,
+        &setup.resource_blocks,
+        &setup.backlash_rates,
         is_new_nuclear,
         &mut rng,
     );
@@ -93,7 +88,7 @@ pub fn advance_stage(
     // Special nuclear build-cost adjustments (game-design rule, non-WY setups only)
     // `next_build_cost` is in block order, so locate nuclear by name.
     let nuclear_block = resource_params.names.iter().position(|n| n == "nuclear");
-    if let (false, Some(nuclear_g)) = (is_wy_setup, nuclear_block) {
+    if let (false, Some(nuclear_g)) = (setup.is_wy_setup, nuclear_block) {
         if planning_year == 2030 {
             // After 2030, nuclear becomes harder next stage (halve GW/token)
             next_build_cost[nuclear_g] = (next_build_cost[nuclear_g] / 2.0).ceil();
@@ -180,9 +175,9 @@ fn resolve_uncertainty(
             params.outage_probability
         };
 
-        for g in 0..n_g {
+        for (g, forced) in forced_outages.iter_mut().enumerate().take(n_g) {
             if rng.gen::<f64>() < outage_prob {
-                forced_outages[g] = true;
+                *forced = true;
                 let reduction = 1.0 - params.outage_rate;
                 for t in t_start..t_end {
                     inputs.variability[t * n_g + g] *= reduction;
@@ -285,8 +280,8 @@ fn compute_results(
     let mut gen_mwh = vec![0.0f64; n_g];
     for t in 0..n_t {
         let w = inputs.sample_weight[t];
-        for g in 0..n_g {
-            gen_mwh[g] += w * sol.gen[t * n_g + g];
+        for (acc, &p) in gen_mwh.iter_mut().zip(&sol.gen[t * n_g..(t + 1) * n_g]) {
+            *acc += w * p;
         }
     }
     // Storage: subtract charging (net generation = discharge - charge)
@@ -451,8 +446,8 @@ fn compute_results(
             let nonserved = if n_s > 0 { sol.nse[t * n_s] / 1000.0 } else { 0.0 };
 
             let mut generation = [0.0f64; N_RESOURCES];
-            for g in 0..n_g.min(N_RESOURCES) {
-                generation[g] = sol.gen[t * n_g + g] / 1000.0;
+            for (out, &p) in generation.iter_mut().zip(&sol.gen[t * n_g..(t + 1) * n_g]) {
+                *out = p / 1000.0;
             }
 
             DispatchHour {
@@ -520,7 +515,6 @@ fn sample_normal(mean: f64, std: f64, rng: &mut impl Rng) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::*;
 
     fn test_scoring_params() -> ScoringParams {
         ScoringParams {
@@ -604,19 +598,8 @@ mod tests {
         gs.resource_params.build_tokens[nuclear] = 1; // retain 10 GW
         gs.resource_params.build_tokens[solar] = 2; // build 30 GW
 
-        let (sr, backlash, experience) = advance_stage(
-            1,
-            2030,
-            &gs.resource_params,
-            &gs.shaping_tokens(),
-            &gs.setup.uncertainty_params,
-            &gs.setup.scoring_params,
-            gs.setup.experience_rate,
-            &gs.setup.resource_blocks,
-            &gs.setup.backlash_rates,
-            false,
-            false,
-        );
+        let (sr, backlash, experience) =
+            advance_stage(&gs.setup, 1, &gs.resource_params, &gs.shaping_tokens(), false);
         gs.apply_stage_results(sr, backlash, experience);
 
         let rp = &gs.resource_params;
