@@ -43,11 +43,9 @@ pub fn EndGameScreen() -> impl IntoView {
             // --- Per-stage score breakdown ---
             {move || game.with(|opt| {
                 let gs = opt.as_ref()?;
-                let n = gs.stage_history.len();
-                if n == 0 { return None; }
-
+                // All stages, including any played before a saved game was resumed.
                 let mut cumulative = 0i32;
-                let rows: Vec<(usize, u32, i32, i32, i32, i32)> = (0..n)
+                let rows: Vec<(usize, u32, i32, i32, i32, i32)> = (0..N_STAGES)
                     .map(|i| {
                         let year = gs.setup.stages[i];
                         let rel  = gs.setup.reliability_scores[i];
@@ -92,7 +90,9 @@ pub fn EndGameScreen() -> impl IntoView {
                 let n = gs.stage_history.len();
                 if n == 0 { return None; }
 
-                let years: Vec<u32> = (0..n).map(|i| gs.setup.stages[i]).collect();
+                let years: Vec<u32> = (0..n)
+                    .map(|i| gs.setup.stages[gs.history_stage_num(i) - 1])
+                    .collect();
 
                 // Build a 2-D array: rows = resources, cols = stages
                 let cap_table: Vec<Vec<f64>> = (0..N_RESOURCES)
@@ -124,7 +124,7 @@ pub fn EndGameScreen() -> impl IntoView {
                         </thead>
                         <tbody>
                             {cap_table.into_iter().enumerate().map(|(g, caps)| {
-                                let label = RESOURCE_LABELS[g];
+                                let label = gs.label(RESOURCE_ORDER[g]);
                                 view! {
                                     <tr>
                                         <td>{label}</td>

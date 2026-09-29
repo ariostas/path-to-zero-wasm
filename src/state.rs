@@ -95,9 +95,15 @@ impl GameState {
     // Derived accessors
     // -----------------------------------------------------------------------
 
-    /// Current stage number (1-based).
+    /// Current stage number (1-based). Resumed games start at the saved
+    /// `current_stage`.
     pub fn current_stage_num(&self) -> usize {
-        self.stage_history.len() + 1
+        self.setup.current_stage + self.stage_history.len()
+    }
+
+    /// Stage number (1-based) of `stage_history[i]`.
+    pub fn history_stage_num(&self, i: usize) -> usize {
+        self.setup.current_stage + i
     }
 
     /// Planning year for the current stage.
@@ -113,6 +119,14 @@ impl GameState {
             .find(|b| b.edg_data_name == "nuclear")
             .map(|b| b.new_resource)
             .unwrap_or(false)
+    }
+
+    /// Display label for an EDG resource name in this game's region.
+    pub fn label(&self, edg_name: &str) -> &'static str {
+        match resource_index(edg_name) {
+            Some(g) => region_resource_label(RESOURCE_ORDER[g], self.setup.is_wy_setup),
+            None => "Unknown",
+        }
     }
 
     /// Integer shaping token counts, ready to pass to the engine.
@@ -246,6 +260,22 @@ impl GameState {
     /// Final score: stage points + affordability − backlash penalty.
     pub fn final_score(&self) -> i32 {
         self.total_score() + self.affordability_points() - self.backlash_penalty()
+    }
+
+    /// The setup describing this game at the start of the current stage, in
+    /// the same format as the setup files, so it can be saved and resumed.
+    /// Only meaningful before any tokens are allocated or traded this stage.
+    pub fn save_setup(&self) -> GameSetup {
+        let mut setup = self.setup.clone();
+        setup.current_stage = self.current_stage_num();
+        setup.available_budget_tokens = self.budget_tokens;
+        setup.current_stage_shaping_tokens = self.shaping_tokens_available;
+        setup.shaping_tokens = self.shaping_locked.clone();
+        for (g, block) in setup.resource_blocks.iter_mut().enumerate() {
+            block.start_capacity = self.resource_params.start_capacity[g];
+            block.build_cost = self.resource_params.build_cost[g];
+        }
+        setup
     }
 
     // -----------------------------------------------------------------------
@@ -435,7 +465,7 @@ mod tests {
     use crate::data;
 
     fn us_game() -> GameState {
-        let setup = data::parse_game_setup(data::SETUP_US);
+        let setup = data::parse_game_setup(data::SETUP_US).unwrap();
         GameState::new(setup)
     }
 
@@ -639,5 +669,41 @@ mod tests {
         gs.setup.resource_blocks[gas].social_backlash = true; // existing: no penalty
         assert_eq!(gs.total_score(), 45);
         assert_eq!(gs.final_score(), 45 + 6 - 2);
+    }
+
+    #[test]
+    fn saved_game_resumes_where_it_left_off() {
+        let mut gs = us_game();
+        let gas = block(&gs, "natural_gas");
+        for _ in 0..3 {
+            gs.add_token(gas);
+        }
+        gs.buy_shaping_token();
+        gs.toggle_shaping(ShapingKind::SocialLicense);
+        gs.advance();
+
+        let yaml = data::game_setup_to_yaml(&gs.save_setup());
+        let resumed = GameState::new(data::parse_game_setup(&yaml).unwrap());
+        assert_eq!(resumed.current_stage_num(), 2);
+        assert_eq!(resumed.current_year(), gs.current_year());
+        assert_eq!(resumed.resource_params.start_capacity, gs.resource_params.start_capacity);
+        assert_eq!(resumed.resource_params.build_cost, gs.resource_params.build_cost);
+        assert_eq!(resumed.budget_tokens, gs.budget_tokens);
+        assert_eq!(resumed.shaping_tokens_available, gs.shaping_tokens_available);
+        assert_eq!(resumed.shaping_locked, gs.shaping_locked);
+        assert!(resumed.shaping_locked.social_license);
+        assert_eq!(resumed.total_score(), gs.total_score());
+        for g in 0..N_RESOURCES {
+            assert_eq!(resumed.is_locked(g), gs.is_locked(g));
+        }
+    }
+
+    #[test]
+    fn builtin_setups_round_trip_through_yaml() {
+        for (name, yaml) in data::builtin_setups() {
+            let setup = data::parse_game_setup(yaml).unwrap();
+            let again = data::parse_game_setup(&data::game_setup_to_yaml(&setup)).unwrap();
+            assert_eq!(format!("{setup:?}"), format!("{again:?}"), "{name}");
+        }
     }
 }

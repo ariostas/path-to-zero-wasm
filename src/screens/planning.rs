@@ -149,7 +149,10 @@ pub fn PlanningScreen() -> impl IntoView {
             </Show>
 
             // --- Preview results (shown after clicking Preview) ---
-            {move || game.with(|opt| opt.as_ref()?.preview.as_ref().map(preview_panel))}
+            {move || game.with(|opt| {
+                let gs = opt.as_ref()?;
+                gs.preview.as_ref().map(|p| preview_panel(p, gs.setup.is_wy_setup))
+            })}
 
         </div>
     }
@@ -252,7 +255,7 @@ fn resource_card(game: GameSignal, g: usize) -> impl IntoView {
     }
 }
 
-fn preview_panel(p: &SimulationResults) -> impl IntoView {
+fn preview_panel(p: &SimulationResults, is_wy_setup: bool) -> impl IntoView {
     let scores = p.scores.clone();
     let resources = p.resource_results.clone();
     let nse = p.nse_result.clone();
@@ -306,19 +309,19 @@ fn preview_panel(p: &SimulationResults) -> impl IntoView {
                 </div>
             </div>
 
-            {generation_table(&resources)}
+            {generation_table(&resources, is_wy_setup)}
         </div>
     }
 }
 
 /// Generation mix table, shared by the preview and stage results.
-pub(crate) fn generation_table(resources: &[ResourceResult]) -> impl IntoView {
+pub(crate) fn generation_table(resources: &[ResourceResult], is_wy_setup: bool) -> impl IntoView {
     let rows = resources
         .iter()
         .map(|r| {
             view! {
                 <tr>
-                    <td>{resource_label(&r.resource).to_string()}</td>
+                    <td>{region_resource_label(&r.resource, is_wy_setup).to_string()}</td>
                     <td class="text-center">{format!("{:.0}", r.gwh)}</td>
                     <td class="text-center">{format!("{:.1}%", r.percent_gwh)}</td>
                     <td class="text-center">{format!("{:.2}", r.ending_capacity_gw)}</td>

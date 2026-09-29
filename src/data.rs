@@ -495,31 +495,40 @@ pub fn load_sim_inputs(
 // Game setup YAML parsing
 // ---------------------------------------------------------------------------
 
-/// Raw serde structs mirroring the YAML schema — kept private to this module.
+/// Raw serde structs mirroring the YAML schema (and the original game's
+/// save format) — kept private to this module.
 mod yaml_schema {
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
+    use std::collections::BTreeMap;
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Serialize)]
     pub struct RawSetup {
-        pub current_stage: Option<usize>,
+        #[serde(default = "first_stage")]
+        pub current_stage: usize,
         pub available_budget_tokens: i32,
         pub available_shaping_tokens: i32,
         pub current_stage_shaping_tokens: i32,
         pub available_build_tokens: Vec<i32>,
+        #[serde(rename = "is_WY_setup", alias = "is_wy_setup", default)]
+        pub is_wy_setup: bool,
         pub stages: Vec<u32>,
-        pub resource_blocks: std::collections::BTreeMap<String, RawBlock>,
+        pub resource_blocks: BTreeMap<String, RawBlock>,
         pub uncertainty_parameters: RawUncertainty,
         pub experience_rate: f64,
         pub backlash_rates: RawBacklashRates,
         pub scoring_parameters: RawScoring,
         pub shaping_tokens: RawShapingTokens,
-        pub reliability_scores: Option<std::collections::BTreeMap<usize, i32>>,
-        pub clean_scores: Option<std::collections::BTreeMap<usize, i32>>,
-        #[serde(alias = "is_WY_setup")]
-        pub is_wy_setup: Option<bool>,
+        #[serde(default)]
+        pub reliability_scores: BTreeMap<usize, i32>,
+        #[serde(default)]
+        pub clean_scores: BTreeMap<usize, i32>,
     }
 
-    #[derive(Deserialize)]
+    fn first_stage() -> usize {
+        1
+    }
+
+    #[derive(Deserialize, Serialize)]
     pub struct RawBlock {
         pub name: String,
         pub start_capacity: f64,
@@ -531,15 +540,9 @@ mod yaml_schema {
         pub edg_data_info: String,
         pub new_resource: bool,
         pub social_backlash: bool,
-        // per-stage built capacities (optional, present in saved files)
-        pub cap_built_stage_1: Option<f64>,
-        pub cap_built_stage_2: Option<f64>,
-        pub cap_built_stage_3: Option<f64>,
-        pub cap_built_stage_4: Option<f64>,
-        pub cap_built_stage_5: Option<f64>,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Serialize)]
     pub struct RawUncertainty {
         #[serde(rename = "Demand_Variance")]
         pub demand_variance: f64,
@@ -551,7 +554,7 @@ mod yaml_schema {
         pub disaster_probability: Vec<f64>,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Serialize)]
     pub struct RawBacklashRates {
         pub none: f64,
         pub low: f64,
@@ -559,7 +562,7 @@ mod yaml_schema {
         pub high: f64,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Serialize)]
     pub struct RawScoring {
         #[serde(rename = "Max_Points")]
         pub max_points: usize,
@@ -577,7 +580,7 @@ mod yaml_schema {
         pub reliability: Vec<f64>,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Serialize)]
     pub struct RawShapingTokens {
         pub resilience: bool,
         pub innovation_experience: bool,
@@ -586,131 +589,198 @@ mod yaml_schema {
     }
 }
 
-pub fn parse_game_setup(yaml_str: &str) -> GameSetup {
+/// Parse and validate a game setup YAML (a built-in scenario, a custom
+/// setup, or a saved game from this app or the original).
+pub fn parse_game_setup(yaml_str: &str) -> Result<GameSetup, String> {
     use yaml_schema::*;
-    let raw: RawSetup = serde_norway::from_str(yaml_str)
-        .expect("Failed to parse game setup YAML");
+    let raw: RawSetup =
+        serde_norway::from_str(yaml_str).map_err(|e| format!("Invalid setup file: {e}"))?;
 
-    let current_stage = raw.current_stage.unwrap_or(1).max(1);
-
-    // stages
-    assert_eq!(raw.stages.len(), N_STAGES, "Expected 5 planning stages");
-    let stages: [u32; N_STAGES] = raw.stages.try_into().unwrap();
-
-    // available build tokens per stage
-    let mut abt = [10i32; N_STAGES];
-    for (i, v) in raw.available_build_tokens.iter().enumerate().take(N_STAGES) {
-        abt[i] = *v;
+    if !(1..=N_STAGES).contains(&raw.current_stage) {
+        return Err(format!(
+            "current_stage must be between 1 and {N_STAGES} (got {}); finished games cannot be resumed",
+            raw.current_stage
+        ));
     }
 
-    // resource blocks (block_1 .. block_8, sorted by key)
-    let mut block_keys: Vec<&String> = raw.resource_blocks.keys().collect();
-    block_keys.sort();
-    assert_eq!(block_keys.len(), N_RESOURCES, "Expected 8 resource blocks");
-
-    let resource_blocks: Vec<ResourceBlock> = block_keys
-        .iter()
-        .map(|k| {
-            let b = &raw.resource_blocks[*k];
-            ResourceBlock {
-                name: b.name.clone(),
-                start_capacity: b.start_capacity,
-                build_cost: b.build_cost,
-                backlash_risk: BacklashLevel::from_str(&b.backlash_risk),
-                edg_data_name: b.edg_data_name.clone(),
-                edg_data_info: b.edg_data_info.clone(),
-                new_resource: b.new_resource,
-                social_backlash: b.social_backlash,
-                cap_built: [
-                    b.cap_built_stage_1.unwrap_or(0.0),
-                    b.cap_built_stage_2.unwrap_or(0.0),
-                    b.cap_built_stage_3.unwrap_or(0.0),
-                    b.cap_built_stage_4.unwrap_or(0.0),
-                    b.cap_built_stage_5.unwrap_or(0.0),
-                ],
-            }
-        })
-        .collect();
-    let resource_blocks: [ResourceBlock; N_RESOURCES] = resource_blocks.try_into().unwrap();
-
-    // uncertainty
-    let dp: [f64; N_STAGES] = raw
-        .uncertainty_parameters
-        .disaster_probability
-        .iter()
-        .copied()
-        .take(N_STAGES)
-        .collect::<Vec<_>>()
+    let stages: [u32; N_STAGES] = raw
+        .stages
         .try_into()
-        .unwrap_or([0.15, 0.3, 0.45, 0.6, 0.75]);
+        .map_err(|v: Vec<u32>| format!("Expected {N_STAGES} stages, got {}", v.len()))?;
+    if let Some(y) = stages.iter().find(|y| !DATA_YEARS.contains(y)) {
+        return Err(format!("No input data for planning year {y} (available: {DATA_YEARS:?})"));
+    }
 
-    let uncertainty_params = UncertaintyParams {
-        demand_variance: raw.uncertainty_parameters.demand_variance,
-        outage_probability: raw.uncertainty_parameters.outage_probability,
-        outage_rate: raw.uncertainty_parameters.outage_rate,
-        disaster_probability: dp,
-    };
+    let available_build_tokens: [i32; N_STAGES] =
+        raw.available_build_tokens.try_into().map_err(|v: Vec<i32>| {
+            format!("Expected {N_STAGES} available_build_tokens entries, got {}", v.len())
+        })?;
 
-    let backlash_rates = BacklashRates {
-        none: raw.backlash_rates.none,
-        low: raw.backlash_rates.low,
-        moderate: raw.backlash_rates.moderate,
-        high: raw.backlash_rates.high,
-    };
-
-    // scoring (5 thresholds per stage, max 5 points)
-    let clean_thresholds = [
-        to_arr5(&raw.scoring_parameters.clean_stage_1),
-        to_arr5(&raw.scoring_parameters.clean_stage_2),
-        to_arr5(&raw.scoring_parameters.clean_stage_3),
-        to_arr5(&raw.scoring_parameters.clean_stage_4),
-        to_arr5(&raw.scoring_parameters.clean_stage_5),
-    ];
-    let reliability_thresholds = to_arr5(&raw.scoring_parameters.reliability);
-    let scoring_params = ScoringParams {
-        max_points: raw.scoring_parameters.max_points,
-        clean_thresholds,
-        reliability_thresholds,
-    };
-
-    // shaping tokens
-    let shaping_tokens = ShapingTokensState {
-        resilience: raw.shaping_tokens.resilience,
-        innovation_experience: raw.shaping_tokens.innovation_experience,
-        innovation_clean_firm: raw.shaping_tokens.innovation_clean_firm,
-        social_license: raw.shaping_tokens.social_license,
-    };
-
-    // historical scores
-    let to_score_arr = |opt: &Option<std::collections::BTreeMap<usize, i32>>| -> [i32; N_STAGES] {
-        let mut arr = [0i32; N_STAGES];
-        if let Some(m) = opt {
-            for (&k, &v) in m {
-                if k >= 1 && k <= N_STAGES {
-                    arr[k - 1] = v;
-                }
-            }
+    // Resource blocks, in key order (block_1 .. block_8).
+    if raw.resource_blocks.len() != N_RESOURCES {
+        return Err(format!(
+            "Expected {N_RESOURCES} resource blocks, got {}",
+            raw.resource_blocks.len()
+        ));
+    }
+    let mut resource_blocks = Vec::with_capacity(N_RESOURCES);
+    for (key, b) in &raw.resource_blocks {
+        if resource_index(&b.edg_data_name).is_none() {
+            return Err(format!("{key}: unknown EDG_data_name '{}'", b.edg_data_name));
         }
-        arr
+        let backlash_risk = BacklashLevel::parse(&b.backlash_risk)
+            .ok_or_else(|| format!("{key}: unknown backlash_risk '{}'", b.backlash_risk))?;
+        resource_blocks.push(ResourceBlock {
+            name: b.name.clone(),
+            start_capacity: b.start_capacity,
+            build_cost: b.build_cost,
+            backlash_risk,
+            edg_data_name: b.edg_data_name.clone(),
+            edg_data_info: b.edg_data_info.clone(),
+            new_resource: b.new_resource,
+            social_backlash: b.social_backlash,
+        });
+    }
+    for name in RESOURCE_ORDER {
+        if !resource_blocks.iter().any(|b| b.edg_data_name == name) {
+            return Err(format!("No resource block uses EDG_data_name '{name}'"));
+        }
+    }
+    let resource_blocks: [ResourceBlock; N_RESOURCES] =
+        resource_blocks.try_into().expect("length checked above");
+
+    let u = raw.uncertainty_parameters;
+    let disaster_probability: [f64; N_STAGES] =
+        u.disaster_probability.try_into().map_err(|v: Vec<f64>| {
+            format!("Expected {N_STAGES} Disaster_Probability entries, got {}", v.len())
+        })?;
+
+    let s = raw.scoring_parameters;
+    let max_points = s.max_points;
+    if !(1..=5).contains(&max_points) {
+        return Err(format!("Max_Points must be between 1 and 5 (got {max_points})"));
+    }
+    let thresholds = |name: &str, v: &[f64]| -> Result<[f64; 5], String> {
+        if v.len() < max_points {
+            return Err(format!("{name} needs {max_points} thresholds, got {}", v.len()));
+        }
+        Ok(to_arr5(v))
+    };
+    let scoring_params = ScoringParams {
+        max_points,
+        clean_thresholds: [
+            thresholds("Clean_Stage_1", &s.clean_stage_1)?,
+            thresholds("Clean_Stage_2", &s.clean_stage_2)?,
+            thresholds("Clean_Stage_3", &s.clean_stage_3)?,
+            thresholds("Clean_Stage_4", &s.clean_stage_4)?,
+            thresholds("Clean_Stage_5", &s.clean_stage_5)?,
+        ],
+        reliability_thresholds: thresholds("Reliability", &s.reliability)?,
     };
 
-    GameSetup {
-        current_stage,
+    let to_score_arr = |m: &std::collections::BTreeMap<usize, i32>| -> [i32; N_STAGES] {
+        std::array::from_fn(|i| m.get(&(i + 1)).copied().unwrap_or(0))
+    };
+
+    Ok(GameSetup {
+        current_stage: raw.current_stage,
         available_budget_tokens: raw.available_budget_tokens,
         available_shaping_tokens: raw.available_shaping_tokens,
         current_stage_shaping_tokens: raw.current_stage_shaping_tokens,
-        available_build_tokens: abt,
+        available_build_tokens,
         stages,
         resource_blocks,
-        uncertainty_params,
+        uncertainty_params: UncertaintyParams {
+            demand_variance: u.demand_variance,
+            outage_probability: u.outage_probability,
+            outage_rate: u.outage_rate,
+            disaster_probability,
+        },
         experience_rate: raw.experience_rate,
-        backlash_rates,
+        backlash_rates: BacklashRates {
+            none: raw.backlash_rates.none,
+            low: raw.backlash_rates.low,
+            moderate: raw.backlash_rates.moderate,
+            high: raw.backlash_rates.high,
+        },
         scoring_params,
-        shaping_tokens,
+        shaping_tokens: ShapingTokensState {
+            resilience: raw.shaping_tokens.resilience,
+            innovation_experience: raw.shaping_tokens.innovation_experience,
+            innovation_clean_firm: raw.shaping_tokens.innovation_clean_firm,
+            social_license: raw.shaping_tokens.social_license,
+        },
         reliability_scores: to_score_arr(&raw.reliability_scores),
         clean_scores: to_score_arr(&raw.clean_scores),
-        is_wy_setup: raw.is_wy_setup.unwrap_or(false),
-    }
+        is_wy_setup: raw.is_wy_setup,
+    })
+}
+
+/// Serialise a game setup to YAML in the same format `parse_game_setup`
+/// reads (and the original game writes for saved games).
+pub fn game_setup_to_yaml(setup: &GameSetup) -> String {
+    use yaml_schema::*;
+    let n = setup.scoring_params.max_points.min(5);
+    let clean = |i: usize| setup.scoring_params.clean_thresholds[i][..n].to_vec();
+    let scores = |arr: &[i32; N_STAGES]| (1..=N_STAGES).zip(arr.iter().copied()).collect();
+    let raw = RawSetup {
+        current_stage: setup.current_stage,
+        available_budget_tokens: setup.available_budget_tokens,
+        available_shaping_tokens: setup.available_shaping_tokens,
+        current_stage_shaping_tokens: setup.current_stage_shaping_tokens,
+        available_build_tokens: setup.available_build_tokens.to_vec(),
+        is_wy_setup: setup.is_wy_setup,
+        stages: setup.stages.to_vec(),
+        resource_blocks: setup
+            .resource_blocks
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let raw = RawBlock {
+                    name: b.name.clone(),
+                    start_capacity: b.start_capacity,
+                    build_cost: b.build_cost,
+                    backlash_risk: b.backlash_risk.as_str().to_string(),
+                    edg_data_name: b.edg_data_name.clone(),
+                    edg_data_info: b.edg_data_info.clone(),
+                    new_resource: b.new_resource,
+                    social_backlash: b.social_backlash,
+                };
+                (format!("block_{}", i + 1), raw)
+            })
+            .collect(),
+        uncertainty_parameters: RawUncertainty {
+            demand_variance: setup.uncertainty_params.demand_variance,
+            outage_probability: setup.uncertainty_params.outage_probability,
+            outage_rate: setup.uncertainty_params.outage_rate,
+            disaster_probability: setup.uncertainty_params.disaster_probability.to_vec(),
+        },
+        experience_rate: setup.experience_rate,
+        backlash_rates: RawBacklashRates {
+            none: setup.backlash_rates.none,
+            low: setup.backlash_rates.low,
+            moderate: setup.backlash_rates.moderate,
+            high: setup.backlash_rates.high,
+        },
+        scoring_parameters: RawScoring {
+            max_points: setup.scoring_params.max_points,
+            clean_stage_1: clean(0),
+            clean_stage_2: clean(1),
+            clean_stage_3: clean(2),
+            clean_stage_4: clean(3),
+            clean_stage_5: clean(4),
+            reliability: setup.scoring_params.reliability_thresholds[..n].to_vec(),
+        },
+        shaping_tokens: RawShapingTokens {
+            resilience: setup.shaping_tokens.resilience,
+            innovation_experience: setup.shaping_tokens.innovation_experience,
+            innovation_clean_firm: setup.shaping_tokens.innovation_clean_firm,
+            social_license: setup.shaping_tokens.social_license,
+        },
+        reliability_scores: scores(&setup.reliability_scores),
+        clean_scores: scores(&setup.clean_scores),
+    };
+    serde_norway::to_string(&raw).expect("setup serialises to YAML")
 }
 
 fn to_arr5(v: &[f64]) -> [f64; 5] {
@@ -741,7 +811,7 @@ mod tests {
 
     #[test]
     fn parse_game_setup_us_structure() {
-        let setup = parse_game_setup(SETUP_US);
+        let setup = parse_game_setup(SETUP_US).unwrap();
         assert_eq!(setup.stages.len(), N_STAGES);
         assert_eq!(setup.resource_blocks.len(), N_RESOURCES);
         assert_eq!(setup.available_build_tokens.len(), N_STAGES);
@@ -753,7 +823,7 @@ mod tests {
     fn parse_game_setup_all_builtins_succeed() {
         // Verify none of the built-in YAML files panic on parse
         for (name, yaml) in builtin_setups() {
-            let setup = parse_game_setup(yaml);
+            let setup = parse_game_setup(yaml).unwrap();
             assert_eq!(
                 setup.resource_blocks.len(), N_RESOURCES,
                 "wrong resource count for {name}"
@@ -763,16 +833,27 @@ mod tests {
     }
 
     #[test]
+    fn invalid_setups_are_rejected() {
+        let bad_year = SETUP_US.replace("- 2050", "- 2055");
+        assert!(parse_game_setup(&bad_year).unwrap_err().contains("2055"));
+        let bad_resource = SETUP_US.replace("\"clean_firm\"", "\"coal\"");
+        assert!(parse_game_setup(&bad_resource).unwrap_err().contains("coal"));
+        let finished = SETUP_US.replace("current_stage: 1", "current_stage: 6");
+        assert!(parse_game_setup(&finished).is_err());
+        assert!(parse_game_setup("not: [valid").is_err());
+    }
+
+    #[test]
     fn only_wyoming_is_wy_setup() {
         for (name, yaml) in builtin_setups() {
-            let setup = parse_game_setup(yaml);
+            let setup = parse_game_setup(yaml).unwrap();
             assert_eq!(setup.is_wy_setup, name == "WY_setup.yml", "{name}");
         }
     }
 
     #[test]
     fn parse_game_setup_stages_are_ascending() {
-        let setup = parse_game_setup(SETUP_US);
+        let setup = parse_game_setup(SETUP_US).unwrap();
         for i in 1..N_STAGES {
             assert!(
                 setup.stages[i] > setup.stages[i - 1],
@@ -784,7 +865,7 @@ mod tests {
     #[test]
     fn parse_game_setup_shaping_tokens_present() {
         // Shaping tokens should parse without panicking; default state is all false
-        let setup = parse_game_setup(SETUP_US);
+        let setup = parse_game_setup(SETUP_US).unwrap();
         // Just confirm the field exists and is accessible
         let _ = setup.shaping_tokens;
     }

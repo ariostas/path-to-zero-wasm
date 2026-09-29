@@ -593,7 +593,7 @@ mod tests {
         use crate::data::{parse_game_setup, SETUP_US};
         use crate::state::GameState;
 
-        let mut gs = GameState::new(parse_game_setup(SETUP_US));
+        let mut gs = GameState::new(parse_game_setup(SETUP_US).unwrap());
         let block = |name: &str| gs.resource_params.names.iter().position(|n| n == name).unwrap();
         let (gas, nuclear, solar, wind) =
             (block("natural_gas"), block("nuclear"), block("solar_pv"), block("onshore_wind"));

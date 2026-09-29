@@ -33,3 +33,21 @@ pub(crate) fn act(game: GameSignal, f: impl FnOnce(&mut GameState)) {
         }
     });
 }
+
+/// Offer `text` to the user as a file download named `filename`.
+pub(crate) fn download_text(filename: &str, text: &str) -> Result<(), wasm_bindgen::JsValue> {
+    use wasm_bindgen::JsCast;
+
+    let parts = js_sys::Array::of1(&text.into());
+    let options = web_sys::BlobPropertyBag::new();
+    options.set_type("text/yaml");
+    let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &options)?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob)?;
+
+    let document = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
+    let anchor: web_sys::HtmlAnchorElement = document.create_element("a")?.dyn_into()?;
+    anchor.set_href(&url);
+    anchor.set_download(filename);
+    anchor.click();
+    web_sys::Url::revoke_object_url(&url)
+}

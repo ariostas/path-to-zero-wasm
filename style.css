@@ -369,6 +369,16 @@ header h2 {
     margin-bottom: 6px;
 }
 
+.setup-upload {
+    margin-top: 16px;
+    font-size: 0.9rem;
+}
+
+.upload-error {
+    color: rgb(200, 40, 0);
+    margin-top: 6px;
+}
+
 .setup-actions {
     margin-top: 24px;
 }

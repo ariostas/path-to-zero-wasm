@@ -37,6 +37,16 @@ pub fn resource_label(edg_name: &str) -> &str {
     resource_index(edg_name).map_or(edg_name, |g| RESOURCE_LABELS[g])
 }
 
+/// Like [`resource_label`], but using the Wyoming names where the setup
+/// repurposes resources (as the original game does).
+pub fn region_resource_label(edg_name: &str, is_wy_setup: bool) -> &str {
+    match (is_wy_setup, edg_name) {
+        (true, "natural_gas") => "Existing Coal",
+        (true, "nuclear") => "New Nuclear",
+        _ => resource_label(edg_name),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Game setup (loaded from YAML at startup)
 // ---------------------------------------------------------------------------
@@ -50,12 +60,23 @@ pub enum BacklashLevel {
 }
 
 impl BacklashLevel {
-    pub fn from_str(s: &str) -> Self {
+    /// Parse a YAML backlash level (case-insensitive).
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
-            "low" => Self::Low,
-            "moderate" => Self::Moderate,
-            "high" => Self::High,
-            _ => Self::None,
+            "none" => Some(Self::None),
+            "low" => Some(Self::Low),
+            "moderate" => Some(Self::Moderate),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Low => "low",
+            Self::Moderate => "moderate",
+            Self::High => "high",
         }
     }
 }
@@ -75,10 +96,8 @@ pub struct ResourceBlock {
     pub edg_data_info: String,
     /// True = new buildable resource; false = existing (can only retain).
     pub new_resource: bool,
-    /// Set to true after a social backlash event locks this resource.
+    /// True while a social backlash event locks this resource (one stage).
     pub social_backlash: bool,
-    // Per-stage built capacity (GW), filled in as the game progresses.
-    pub cap_built: [f64; N_STAGES],
 }
 
 #[derive(Debug, Clone)]
@@ -440,17 +459,13 @@ mod tests {
     }
 
     #[test]
-    fn backlash_level_from_str_all_variants() {
-        assert!(matches!(BacklashLevel::from_str("low"), BacklashLevel::Low));
-        assert!(matches!(BacklashLevel::from_str("LOW"), BacklashLevel::Low));
-        assert!(matches!(BacklashLevel::from_str("Low"), BacklashLevel::Low));
-        assert!(matches!(BacklashLevel::from_str("moderate"), BacklashLevel::Moderate));
-        assert!(matches!(BacklashLevel::from_str("MODERATE"), BacklashLevel::Moderate));
-        assert!(matches!(BacklashLevel::from_str("high"), BacklashLevel::High));
-        assert!(matches!(BacklashLevel::from_str("HIGH"), BacklashLevel::High));
-        assert!(matches!(BacklashLevel::from_str("none"), BacklashLevel::None));
-        assert!(matches!(BacklashLevel::from_str(""), BacklashLevel::None));
-        assert!(matches!(BacklashLevel::from_str("unknown"), BacklashLevel::None));
+    fn backlash_level_parse_round_trips() {
+        for level in [BacklashLevel::None, BacklashLevel::Low, BacklashLevel::Moderate, BacklashLevel::High] {
+            assert_eq!(BacklashLevel::parse(level.as_str()), Some(level.clone()));
+            assert_eq!(BacklashLevel::parse(&level.as_str().to_uppercase()), Some(level));
+        }
+        assert_eq!(BacklashLevel::parse(""), None);
+        assert_eq!(BacklashLevel::parse("unknown"), None);
     }
 
     #[test]

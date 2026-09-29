@@ -2,7 +2,8 @@ use leptos::prelude::*;
 use leptos_chartistry::*;
 
 use super::planning::generation_table;
-use super::{act, read, use_game};
+use super::{act, download_text, read, use_game, GameSignal};
+use crate::data::game_setup_to_yaml;
 use crate::state::GameState;
 use crate::types::*;
 
@@ -72,13 +73,13 @@ const STACK: [(&str, Colour); N_RESOURCES] = [
     ("natural_gas", Colour::from_rgb(0xd6, 0x27, 0x28)),
 ];
 
-fn dispatch_series() -> Series<ChartPoint, f64, f64> {
+fn dispatch_series(is_wy_setup: bool) -> Series<ChartPoint, f64, f64> {
     let mut stack = Stack::new();
     for (name, colour) in STACK {
         let g = resource_index(name).expect("known resource");
         stack = stack.line(
             Line::new(move |p: &ChartPoint| p.generation[g])
-                .with_name(resource_label(name))
+                .with_name(region_resource_label(name, is_wy_setup))
                 .with_colour(colour),
         );
     }
@@ -135,8 +136,8 @@ pub fn StageResultsScreen() -> impl IntoView {
 
             // --- Stage header ---
             {move || read(game, |gs| {
-                let completed = gs.stage_history.len();
-                let year = gs.setup.stages[completed.saturating_sub(1).min(N_STAGES - 1)];
+                let completed = gs.current_stage_num() - 1;
+                let year = gs.setup.stages[completed.clamp(1, N_STAGES) - 1];
                 view! {
                     <h2 class="results-title">
                         {format!("Stage {} Results — {}", completed, year)}
@@ -239,7 +240,7 @@ pub fn StageResultsScreen() -> impl IntoView {
                         XGuideLine::over_data().into_inner(),
                     ]
                     tooltip=Tooltip::left_cursor()
-                    series=dispatch_series()
+                    series=dispatch_series(read(game, |gs| gs.setup.is_wy_setup).unwrap_or(false))
                     data=chart_data
                 />
             </div>
@@ -258,11 +259,11 @@ pub fn StageResultsScreen() -> impl IntoView {
                     .iter()
                     .enumerate()
                     .filter(|(_, &fo)| fo)
-                    .map(|(g, _)| RESOURCE_LABELS[g].to_string())
+                    .map(|(g, _)| gs.label(RESOURCE_ORDER[g]).to_string())
                     .collect();
 
                 // Backlash and experience arrays are in block order.
-                let block_label = |g: usize| resource_label(&gs.resource_params.names[g]).to_string();
+                let block_label = |g: usize| gs.label(&gs.resource_params.names[g]).to_string();
 
                 let backlash_resources: Vec<String> = backlash.backlash
                     .iter()
@@ -335,8 +336,9 @@ pub fn StageResultsScreen() -> impl IntoView {
 
             // --- Generation mix table ---
             {move || game.with(|opt| {
-                let (sr, _, _) = opt.as_ref()?.last_stage_results.as_ref()?;
-                Some(view! { <div class="mt-16">{generation_table(&sr.resource_results)}</div> })
+                let gs = opt.as_ref()?;
+                let (sr, _, _) = gs.last_stage_results.as_ref()?;
+                Some(view! { <div class="mt-16">{generation_table(&sr.resource_results, gs.setup.is_wy_setup)}</div> })
             })}
 
             // --- Continue button ---
@@ -346,8 +348,25 @@ pub fn StageResultsScreen() -> impl IntoView {
                         if gs.is_game_over() { "See Final Results" } else { "Continue to Next Stage" }
                     })}
                 </button>
+                <Show when=move || read(game, |gs| !gs.is_game_over()).unwrap_or(false)>
+                    <button class="btn btn-secondary" on:click=move |_| save_progress(game)>
+                        "Save Progress"
+                    </button>
+                </Show>
             </div>
 
         </div>
+    }
+}
+
+/// Download the game state at the start of the next stage as a setup file
+/// that can be loaded from the setup screen to resume.
+fn save_progress(game: GameSignal) {
+    let Some((stage, yaml)) = read(game, |gs| (gs.current_stage_num(), game_setup_to_yaml(&gs.save_setup())))
+    else {
+        return;
+    };
+    if let Err(e) = download_text(&format!("path_to_zero_stage_{stage}.yml"), &yaml) {
+        web_sys::console::error_1(&e);
     }
 }

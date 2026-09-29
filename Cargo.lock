@@ -1462,12 +1462,14 @@ dependencies = [
  "console_error_panic_hook",
  "csv",
  "getrandom 0.2.17",
+ "js-sys",
  "leptos",
  "leptos-chartistry",
  "rand",
  "serde",
  "serde_norway",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
