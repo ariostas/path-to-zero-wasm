@@ -1,196 +1,14 @@
+//! Reference LP dispatch model (Clarabel), a direct port of `solve` in the
+//! original `EDG_engine.jl`.
+//!
+//! Too slow for interactive use in WASM, so it is only compiled for tests,
+//! where it validates the fast dispatch in the parent module.
+
 use clarabel::algebra::*;
 use clarabel::solver::*;
 
+use super::SolverResult;
 use crate::types::*;
-
-pub struct SolverResult {
-    /// Unshifted generation (MW), indexed [t * N_RESOURCES + g].
-    pub gen: Vec<f64>,
-    /// Charging power (MW), indexed [t * n_stor + stor_local].
-    pub charge: Vec<f64>,
-    /// State of charge (MWh), indexed [t * n_stor + stor_local].
-    pub soc: Vec<f64>,
-    /// Non-served energy (MW), indexed [t * n_s + s_local].
-    pub nse: Vec<f64>,
-    pub objective_value: f64,
-    pub status: String,
-    /// Local indices (into inputs.resources) of storage resources.
-    pub stor_indices: Vec<usize>,
-}
-
-/// Fast greedy dispatch for UI testing — no LP, not optimal.
-///
-/// Dispatches each non-storage resource up to its available capacity in
-/// resource order, then puts any remaining unmet demand into NSE segment 0.
-/// Storage is left idle (charge = SOC = gen = 0).
-pub fn dummy_solve(inputs: &SimInputs) -> SolverResult {
-    let n_t = inputs.demand.len();
-    let n_g = inputs.resources.len();
-    let n_s = inputs.nse_segments.len();
-
-    let stor_indices: Vec<usize> = inputs
-        .resources
-        .iter()
-        .enumerate()
-        .filter(|(_, r)| r.stor >= 1)
-        .map(|(i, _)| i)
-        .collect();
-    let n_stor = stor_indices.len();
-
-    let mut gen = vec![0.0f64; n_t * n_g];
-    let charge = vec![0.0f64; n_t * n_stor];
-    let soc = vec![0.0f64; n_t * n_stor];
-    let mut nse = vec![0.0f64; n_t * n_s];
-
-    for t in 0..n_t {
-        let demand_mw = inputs.demand[t];
-        let mut remaining = demand_mw;
-
-        for g in 0..n_g {
-            if stor_indices.contains(&g) {
-                continue;
-            }
-            let res = &inputs.resources[g];
-            let cf = if res.vre >= 1 {
-                inputs.variability[t * n_g + g]
-            } else {
-                1.0
-            };
-            let available = res.existing_cap_mw * cf;
-            let dispatch = available.min(remaining.max(0.0));
-            gen[t * n_g + g] = dispatch;
-            remaining -= dispatch;
-        }
-
-        if n_s > 0 && remaining > 0.0 {
-            let max_nse = inputs.nse_segments[0].nse_max * demand_mw;
-            nse[t * n_s] = remaining.min(max_nse);
-        }
-    }
-
-    SolverResult {
-        gen,
-        charge,
-        soc,
-        nse,
-        objective_value: 0.0,
-        status: "dummy".to_string(),
-        stor_indices,
-    }
-}
-
-/// Merit-order economic dispatch with a simple battery heuristic.
-///
-/// For each hour:
-///   1. Dispatch non-storage resources cheapest-first up to demand.
-///   2. If VRE produced a surplus, charge battery (up to power and energy limits).
-///      If there is a deficit after thermal dispatch, discharge battery.
-///   3. Any remaining unmet demand → NSE segment 0.
-///
-/// Battery SOC resets to zero at the start of each representative period,
-/// matching the LP's periodic boundary condition.
-pub fn merit_order_solve(inputs: &SimInputs) -> SolverResult {
-    let n_t = inputs.demand.len();
-    let n_g = inputs.resources.len();
-    let n_s = inputs.nse_segments.len();
-    let h = inputs.hours_per_period;
-
-    let stor_indices: Vec<usize> = inputs
-        .resources
-        .iter()
-        .enumerate()
-        .filter(|(_, r)| r.stor >= 1)
-        .map(|(i, _)| i)
-        .collect();
-    let n_stor = stor_indices.len();
-
-    // Non-storage resources sorted cheapest first.
-    let mut dispatch_order: Vec<usize> = (0..n_g)
-        .filter(|g| !stor_indices.contains(g))
-        .collect();
-    dispatch_order.sort_by(|&a, &b| {
-        inputs.resources[a]
-            .var_cost
-            .partial_cmp(&inputs.resources[b].var_cost)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    let mut gen = vec![0.0f64; n_t * n_g];
-    let mut charge_out = vec![0.0f64; n_t * n_stor];
-    let mut soc_out = vec![0.0f64; n_t * n_stor];
-    let mut nse = vec![0.0f64; n_t * n_s];
-
-    // SOC (MWh) for each storage resource, reset at each period boundary.
-    let mut period_soc = vec![0.0f64; n_stor];
-
-    for t in 0..n_t {
-        if t % h == 0 {
-            for s in &mut period_soc {
-                *s = 0.0;
-            }
-        }
-
-        let demand_mw = inputs.demand[t];
-
-        // --- Step 1: merit-order dispatch of non-storage resources ---
-        let mut total_gen = 0.0f64;
-        for &g in &dispatch_order {
-            let res = &inputs.resources[g];
-            let cf = if res.vre >= 1 {
-                inputs.variability[t * n_g + g]
-            } else {
-                1.0
-            };
-            let available = res.existing_cap_mw * cf;
-            let dispatch = available.min((demand_mw - total_gen).max(0.0));
-            gen[t * n_g + g] = dispatch;
-            total_gen += dispatch;
-        }
-
-        // --- Step 2: battery ---
-        let balance = total_gen - demand_mw; // >0 surplus, <0 deficit
-        for (sl, &sg) in stor_indices.iter().enumerate() {
-            let res = &inputs.resources[sg];
-            let cap_mw = res.existing_cap_mw;
-            let cap_mwh = res.existing_cap_mwh;
-            let eff_up = res.eff_up.max(1e-6);
-            let eff_dn = res.eff_down.max(1e-6);
-
-            if balance > 0.0 {
-                // Surplus → charge
-                let headroom = (cap_mwh - period_soc[sl]) / eff_up;
-                let charge_mw = balance.min(cap_mw).min(headroom).max(0.0);
-                charge_out[t * n_stor + sl] = charge_mw;
-                period_soc[sl] += charge_mw * eff_up;
-            } else if balance < 0.0 {
-                // Deficit → discharge
-                let available_energy = period_soc[sl] * eff_dn;
-                let discharge = (-balance).min(cap_mw).min(available_energy).max(0.0);
-                gen[t * n_g + sg] = discharge;
-                period_soc[sl] -= discharge / eff_dn;
-            }
-            soc_out[t * n_stor + sl] = period_soc[sl];
-        }
-
-        // --- Step 3: NSE for any remaining deficit ---
-        let served: f64 = (0..n_g).map(|g| gen[t * n_g + g]).sum();
-        let deficit = (demand_mw - served).max(0.0);
-        if deficit > 0.0 && n_s > 0 {
-            let max_nse = inputs.nse_segments[0].nse_max * demand_mw;
-            nse[t * n_s] = deficit.min(max_nse);
-        }
-    }
-
-    SolverResult {
-        gen,
-        charge: charge_out,
-        soc: soc_out,
-        nse,
-        objective_value: 0.0,
-        status: "merit_order".to_string(),
-        stor_indices,
-    }
-}
 
 /// Solve the LP economic dispatch using Clarabel.
 ///
@@ -552,7 +370,6 @@ fn triplets_to_csc(m: usize, n: usize, mut entries: Vec<(usize, usize, f64)>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::*;
 
     fn thermal(id: usize, cap_mw: f64, var_cost: f64) -> Resource {
         Resource {
@@ -685,39 +502,6 @@ mod tests {
         assert!((r.gen[1] - 600.0).abs() < 1.0, "gen[1]={}", r.gen[1]);
         // Ramp from t=0 to t=1 must not exceed 100 MW
         assert!(r.gen[1] - r.gen[0] <= 100.0 + 1.0, "ramp={}", r.gen[1] - r.gen[0]);
-    }
-
-    /// Run `cargo test --release -- --ignored --nocapture time_real_solve` to benchmark.
-    #[test]
-    #[ignore]
-    fn time_real_solve() {
-        use crate::data::{self, SETUP_US};
-        use crate::state::GameState;
-        use std::time::Instant;
-
-        let setup = data::parse_game_setup(SETUP_US);
-        let gs = GameState::new(setup);
-        let inputs = data::load_sim_inputs(
-            gs.current_year(),
-            &gs.resource_params,
-            gs.is_new_nuclear(),
-        );
-        println!(
-            "Problem: {} time steps, {} resources, {} NSE segments",
-            inputs.demand.len(),
-            inputs.resources.len(),
-            inputs.nse_segments.len(),
-        );
-
-        let t0 = Instant::now();
-        let sol = merit_order_solve(&inputs);
-        let elapsed = t0.elapsed();
-        println!("merit_order_solve() returned {:?} in {:.6}s", sol.status, elapsed.as_secs_f64());
-
-        let t0 = Instant::now();
-        let sol = solve(&inputs);
-        let elapsed = t0.elapsed();
-        println!("solve() (Clarabel LP) returned {:?} in {:.3}s", sol.status, elapsed.as_secs_f64());
     }
 
     #[test]
