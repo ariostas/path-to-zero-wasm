@@ -80,11 +80,15 @@ pub fn advance_stage(
 
     let scores = calc_scores(stage_num, nse_result.reliability, clean_share, scoring_params);
 
-    // Next-stage starting capacities: take the ending MW and convert to GW.
-    let mut next_start_capacity = [0.0f64; N_RESOURCES];
-    for g in 0..N_RESOURCES {
-        next_start_capacity[g] = inputs.resources[g].existing_cap_mw / 1000.0;
-    }
+    // Next-stage starting capacities (GW), in block order. `inputs.resources`
+    // is in CSV order, so match by name rather than by index.
+    let next_start_capacity: [f64; N_RESOURCES] = std::array::from_fn(|i| {
+        inputs
+            .resources
+            .iter()
+            .find(|r| r.name == resource_params.names[i])
+            .map_or(0.0, |r| r.existing_cap_mw / 1000.0)
+    });
 
     let (social_backlash, mut next_build_cost, experience_results) = update_step(
         resource_params,
@@ -97,8 +101,9 @@ pub fn advance_stage(
     );
 
     // Special nuclear build-cost adjustments (game-design rule, non-WY setups only)
-    if !is_wy_setup {
-        let nuclear_g = resource_index("nuclear").unwrap_or(1);
+    // `next_build_cost` is in block order, so locate nuclear by name.
+    let nuclear_block = resource_params.names.iter().position(|n| n == "nuclear");
+    if let (false, Some(nuclear_g)) = (is_wy_setup, nuclear_block) {
         if planning_year == 2030 {
             // After 2030, nuclear becomes harder next stage (halve GW/token)
             next_build_cost[nuclear_g] = (next_build_cost[nuclear_g] / 2.0).ceil();
@@ -579,6 +584,50 @@ mod tests {
         let s5 = calc_scores(5, 100.0, 50.0, &p);
         let s6 = calc_scores(6, 100.0, 50.0, &p);
         assert_eq!(s5.clean_points, s6.clean_points);
+    }
+
+    /// Regression test: stage outputs must be keyed by block order (the YAML
+    /// order used by `ResourceParams`), not by CSV order.
+    #[test]
+    fn advance_stage_preserves_block_order() {
+        use crate::data::{parse_game_setup, SETUP_US};
+        use crate::state::GameState;
+
+        let mut gs = GameState::new(parse_game_setup(SETUP_US));
+        let block = |name: &str| gs.resource_params.names.iter().position(|n| n == name).unwrap();
+        let (gas, nuclear, solar, wind) =
+            (block("natural_gas"), block("nuclear"), block("solar_pv"), block("onshore_wind"));
+        // Block order must differ from CSV order for this test to be meaningful.
+        assert_ne!(gas, resource_index("natural_gas").unwrap());
+
+        gs.resource_params.build_tokens[gas] = 3; // retain 60 GW
+        gs.resource_params.build_tokens[nuclear] = 1; // retain 10 GW
+        gs.resource_params.build_tokens[solar] = 2; // build 30 GW
+
+        let (sr, backlash, experience) = advance_stage(
+            1,
+            2030,
+            &gs.resource_params,
+            &gs.shaping_tokens(),
+            &gs.setup.uncertainty_params,
+            &gs.setup.scoring_params,
+            gs.setup.experience_rate,
+            &gs.setup.resource_blocks,
+            &gs.setup.backlash_rates,
+            false,
+            false,
+        );
+        gs.apply_stage_results(sr, backlash, experience);
+
+        let rp = &gs.resource_params;
+        assert_eq!(rp.start_capacity[gas], 60.0);
+        assert_eq!(rp.start_capacity[nuclear], 10.0);
+        assert_eq!(rp.start_capacity[solar], 30.0);
+        assert_eq!(rp.start_capacity[wind], 0.0);
+        // Nuclear GW/token is halved (rounded up) after 2030.
+        assert_eq!(rp.build_cost[nuclear], 5.0);
+        // Solar only gets experience-curve gains, never the nuclear halving.
+        assert!(rp.build_cost[solar] >= 15.0, "solar cost {}", rp.build_cost[solar]);
     }
 
     #[test]

@@ -3,17 +3,6 @@ use leptos::prelude::*;
 use crate::state::GameState;
 use crate::types::*;
 
-const RESOURCE_LABELS: [&str; N_RESOURCES] = [
-    "Natural Gas",
-    "Nuclear",
-    "Solar PV",
-    "Dist. Solar",
-    "Onshore Wind",
-    "Offshore Wind",
-    "Battery",
-    "Clean Firm",
-];
-
 #[component]
 pub fn EndGameScreen() -> impl IntoView {
     let game = use_context::<RwSignal<Option<GameState>>>().expect("game context");

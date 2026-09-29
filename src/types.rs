@@ -20,6 +20,23 @@ pub fn resource_index(name: &str) -> Option<usize> {
     RESOURCE_ORDER.iter().position(|&n| n == name)
 }
 
+/// Display labels matching `RESOURCE_ORDER`.
+pub const RESOURCE_LABELS: [&str; N_RESOURCES] = [
+    "Natural Gas",
+    "Nuclear",
+    "Solar PV",
+    "Dist. Solar",
+    "Onshore Wind",
+    "Offshore Wind",
+    "Battery",
+    "Clean Firm",
+];
+
+/// Display label for an EDG resource name (e.g. "solar_pv" -> "Solar PV").
+pub fn resource_label(edg_name: &str) -> &str {
+    resource_index(edg_name).map_or(edg_name, |g| RESOURCE_LABELS[g])
+}
+
 // ---------------------------------------------------------------------------
 // Game setup (loaded from YAML at startup)
 // ---------------------------------------------------------------------------
@@ -140,6 +157,9 @@ pub struct GameSetup {
 // ---------------------------------------------------------------------------
 
 /// The three mutable per-resource parameters that evolve across stages.
+///
+/// All arrays are in *block order* (the order of `resource_blocks` in the
+/// setup YAML), which generally differs from `RESOURCE_ORDER`.
 #[derive(Debug, Clone)]
 pub struct ResourceParams {
     /// Internal EDG data names, e.g. "solar_pv".  Fixed for the session.
@@ -291,6 +311,7 @@ pub struct UncertaintyResult {
     pub outage_rate: f64,
     /// Week number (1-based) of the disaster; -1 if no disaster.
     pub outage_week: i32,
+    /// Indexed in `RESOURCE_ORDER` (CSV order).
     pub forced_outages: [bool; N_RESOURCES],
 }
 
@@ -320,19 +341,19 @@ pub struct StageResults {
     pub dispatch: Vec<DispatchHour>,
     pub uncertainty: UncertaintyResult,
     pub scores: StageScores,
-    /// Updated starting capacities (MW) for the next stage.
+    /// Updated starting capacities (GW) for the next stage, in block order.
     pub next_start_capacity: [f64; N_RESOURCES],
-    /// Updated build costs after experience-curve reductions.
+    /// Updated build costs (GW/token) after experience curves, in block order.
     pub next_build_cost: [f64; N_RESOURCES],
 }
 
-/// Which resources experienced a social backlash event.
+/// Which resources experienced a social backlash event (block order).
 #[derive(Debug, Clone, Default)]
 pub struct SocialBacklash {
     pub backlash: [bool; N_RESOURCES],
 }
 
-/// Learning-curve cost reductions realised this stage.
+/// Learning-curve cost reductions realised this stage (block order).
 #[derive(Debug, Clone, Default)]
 pub struct ExperienceResults {
     pub experience_rate: [f64; N_RESOURCES],

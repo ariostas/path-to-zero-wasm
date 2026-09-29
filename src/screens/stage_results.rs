@@ -5,20 +5,6 @@ use crate::state::GameState;
 use crate::types::*;
 
 // -----------------------------------------------------------------------
-// Resource display names matching RESOURCE_ORDER
-// -----------------------------------------------------------------------
-const RESOURCE_LABELS: [&str; N_RESOURCES] = [
-    "Natural Gas",
-    "Nuclear",
-    "Solar PV",
-    "Dist. Solar",
-    "Onshore Wind",
-    "Offshore Wind",
-    "Battery",
-    "Clean Firm",
-];
-
-// -----------------------------------------------------------------------
 // StageResultsScreen
 // -----------------------------------------------------------------------
 
@@ -187,18 +173,21 @@ pub fn StageResultsScreen() -> impl IntoView {
                     .map(|(g, _)| RESOURCE_LABELS[g].to_string())
                     .collect();
 
+                // Backlash and experience arrays are in block order.
+                let block_label = |g: usize| resource_label(&gs.resource_params.names[g]).to_string();
+
                 let backlash_resources: Vec<String> = backlash_flags
                     .iter()
                     .enumerate()
                     .filter(|(_, &b)| b)
-                    .map(|(g, _)| RESOURCE_LABELS[g].to_string())
+                    .map(|(g, _)| block_label(g))
                     .collect();
 
                 let exp_items: Vec<(String, f64)> = exp_rates
                     .iter()
                     .enumerate()
                     .filter(|(_, &r)| r > 0.0)
-                    .map(|(g, &r)| (RESOURCE_LABELS[g].to_string(), r * 100.0))
+                    .map(|(g, &r)| (block_label(g), r * 100.0))
                     .collect();
 
                 let shock_text = if shock_pct >= 0.0 {
