@@ -305,7 +305,7 @@ pub struct DispatchHour {
 /// Demand/disaster uncertainty realisation for one stage.
 #[derive(Debug, Clone)]
 pub struct UncertaintyResult {
-    /// Fractional demand shock, e.g. 0.03 = +3 %.
+    /// Demand shock in percent, e.g. 3.0 = +3 %.
     pub demand_shock_percent: f64,
     pub disaster: bool,
     pub outage_rate: f64,

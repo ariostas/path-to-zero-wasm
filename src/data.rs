@@ -486,6 +486,7 @@ mod yaml_schema {
         pub shaping_tokens: RawShapingTokens,
         pub reliability_scores: Option<std::collections::BTreeMap<usize, i32>>,
         pub clean_scores: Option<std::collections::BTreeMap<usize, i32>>,
+        #[serde(alias = "is_WY_setup")]
         pub is_wy_setup: Option<bool>,
     }
 
@@ -729,6 +730,14 @@ mod tests {
                 "wrong resource count for {name}"
             );
             assert_eq!(setup.stages.len(), N_STAGES, "wrong stage count for {name}");
+        }
+    }
+
+    #[test]
+    fn only_wyoming_is_wy_setup() {
+        for (name, yaml) in builtin_setups() {
+            let setup = parse_game_setup(yaml);
+            assert_eq!(setup.is_wy_setup, name == "WY_setup.yml", "{name}");
         }
     }
 

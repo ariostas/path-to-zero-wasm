@@ -159,7 +159,7 @@ pub fn StageResultsScreen() -> impl IntoView {
                 let gs = opt.as_ref()?;
                 let (sr, backlash, experience) = gs.last_stage_results.as_ref()?;
 
-                let shock_pct = sr.uncertainty.demand_shock_percent * 100.0;
+                let shock_pct = sr.uncertainty.demand_shock_percent;
                 let disaster = sr.uncertainty.disaster;
                 let outage_week = sr.uncertainty.outage_week;
                 let forced_outages = sr.uncertainty.forced_outages;
