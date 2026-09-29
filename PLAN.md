@@ -1,7 +1,6 @@
 # Path to Zero — Rust/WASM Implementation Plan
 
-The data layer (`data.rs`), LP solver (`solver.rs`), and game engine (`engine.rs`) are
-complete and fully tested. What remains is wiring everything together in a Leptos UI.
+Steps 1–6 and the solver work are complete; Step 7 lists remaining polish.
 
 ---
 
@@ -94,7 +93,7 @@ Shown after all 5 stages have been completed.
 ## Solver optimizations
 
 The original Clarabel LP on the full dataset was too slow for WASM (~15 s).
-Two optimizations were applied; a third is documented for future use.
+The options below were tried in order; Option D is in use.
 
 ### Option A — Skip non-binding ramp constraints ✓
 
@@ -115,29 +114,35 @@ Reduces the LP from 8 735 to 364 time steps. Controlled by `STRIDE` in
 
 **Combined result (A + B, now reverted):** native release solve ~27 ms (was ~15 s).
 
-### Option C — Merit-order dispatch ✓
+### Option C — Merit-order dispatch ✓ (superseded by Option D)
 
-Replace the Clarabel LP entirely with an O(n_t × n_g) heuristic:
+Replaced the LP with a pure merit-order heuristic (0.57 ms native). It had a
+bug that meant the battery never charged, and without storage it diverged
+from the LP by up to ~5 points of clean share and ~1 point of reliability.
 
-1. Sort non-storage generators by variable cost (merit order).
-2. Each hour: dispatch cheapest first up to available capacity (VRE scaled by
-   variability), accumulating unmet demand.
-3. Battery: charge when surplus exists after step 2; discharge against deficit.
-4. Remaining unmet demand → NSE.
+### Option D — Merit order + storage dynamic program ✓
 
-This is essentially what the LP returns for resources with no binding ramp
-constraints, so results should be nearly identical for the current dataset.
-**Result:** 0.57 ms native on full 8 736-step dataset (vs 692 ms for Clarabel LP).
-Implemented in `solver::merit_order_solve`; active in `engine.rs`.
+`solver::dispatch`: generators are dispatched in merit order, and the battery
+is scheduled per representative week by dynamic programming over a
+discretised state of charge (32 steps), where each hour's cost is the
+merit-order cost of serving `demand + charge − discharge`. A second pass
+starts from the first pass's end-of-week state and must end at least as full,
+approximating the LP's cyclic boundary. Min-power and ramp constraints are
+ignored.
+
+**Result:** ~50 ms native, ~90 ms in the browser per stage; within ~0.3
+points of clean share and ~0.01 points of reliability of the LP (with min-power
+and ramps relaxed). The Clarabel LP lives in `solver/lp.rs` as a test-only
+reference, and `solver::tests::matches_lp_on_real_data` checks the agreement.
 
 ---
 
 ## Step 7 — Polish and optional features
 
-- Responsive CSS layout that works on tablets (primary target for classroom use).
-- Tooltips or an info panel for each resource block (using `edg_data_info`).
+- ✓ Responsive CSS layout for tablets and phones.
+- ✓ Info for each resource block (`edg_data_info`, backlash risk, lock reason).
 - Color-coded scoring feedback (green/yellow/red) on the reliability and clean panels.
 - Accessible form controls (ARIA labels, keyboard navigation).
-- Custom YAML upload via `web-sys` `FileReader` API (if not done in Step 2).
-- Persist in-progress game to `localStorage` via `web-sys` so the page can be
-  refreshed without losing progress.
+- ✓ Custom YAML upload, and save/resume via downloaded setup files.
+- Persist in-progress game to `localStorage` so the page can be refreshed
+  without losing progress.

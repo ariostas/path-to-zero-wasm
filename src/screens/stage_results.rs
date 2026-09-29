@@ -229,7 +229,7 @@ pub fn StageResultsScreen() -> impl IntoView {
             </div>
             <div class="chart-container">
                 <Chart
-                    aspect_ratio=AspectRatio::from_outer_ratio(900.0, 350.0)
+                    aspect_ratio=AspectRatio::from_env_width(380.0)
                     top=RotatedLabel::middle("Dispatch (GW)")
                     left=TickLabels::aligned_floats()
                     bottom=vec![TickLabels::aligned_floats().into_edge(), RotatedLabel::middle("Day of year").into_edge()]
